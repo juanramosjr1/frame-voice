@@ -1,0 +1,141 @@
+{
+  "controller_type": "oculus_touch",
+  "name": "fuelCell defaults (oculus_touch)",
+  "description": "Hold grip or trigger with a face button; or hold B / A",
+  "bindings": {
+    "/actions/grip": {
+      "chords": [
+        {
+          "output": "/actions/grip/in/talk",
+          "inputs": [
+            [
+              "/user/hand/right/input/grip",
+              "click"
+            ],
+            [
+              "/user/hand/right/input/b",
+              "click"
+            ]
+          ]
+        },
+        {
+          "output": "/actions/grip/in/paste",
+          "inputs": [
+            [
+              "/user/hand/right/input/grip",
+              "click"
+            ],
+            [
+              "/user/hand/right/input/a",
+              "click"
+            ]
+          ]
+        },
+        {
+          "output": "/actions/grip/in/copy",
+          "inputs": [
+            [
+              "/user/hand/left/input/grip",
+              "click"
+            ],
+            [
+              "/user/hand/left/input/y",
+              "click"
+            ]
+          ]
+        },
+        {
+          "output": "/actions/grip/in/select_all",
+          "inputs": [
+            [
+              "/user/hand/left/input/grip",
+              "click"
+            ],
+            [
+              "/user/hand/left/input/x",
+              "click"
+            ]
+          ]
+        }
+      ]
+    },
+    "/actions/trigger": {
+      "chords": [
+        {
+          "output": "/actions/trigger/in/talk",
+          "inputs": [
+            [
+              "/user/hand/right/input/trigger",
+              "click"
+            ],
+            [
+              "/user/hand/right/input/b",
+              "click"
+            ]
+          ]
+        },
+        {
+          "output": "/actions/trigger/in/paste",
+          "inputs": [
+            [
+              "/user/hand/right/input/trigger",
+              "click"
+            ],
+            [
+              "/user/hand/right/input/a",
+              "click"
+            ]
+          ]
+        },
+        {
+          "output": "/actions/trigger/in/copy",
+          "inputs": [
+            [
+              "/user/hand/left/input/trigger",
+              "click"
+            ],
+            [
+              "/user/hand/left/input/y",
+              "click"
+            ]
+          ]
+        },
+        {
+          "output": "/actions/trigger/in/select_all",
+          "inputs": [
+            [
+              "/user/hand/left/input/trigger",
+              "click"
+            ],
+            [
+              "/user/hand/left/input/x",
+              "click"
+            ]
+          ]
+        }
+      ]
+    },
+    "/actions/simple": {
+      "sources": [
+        {
+          "path": "/user/hand/right/input/b",
+          "mode": "button",
+          "inputs": {
+            "held": {
+              "output": "/actions/simple/in/talk"
+            }
+          }
+        },
+        {
+          "path": "/user/hand/right/input/a",
+          "mode": "button",
+          "inputs": {
+            "held": {
+              "output": "/actions/simple/in/paste"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

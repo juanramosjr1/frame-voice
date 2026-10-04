@@ -1,0 +1,115 @@
+{
+  "default_bindings": [
+    {
+      "controller_type": "frame_controller",
+      "binding_url": "bindings_frame_controller.json"
+    },
+    {
+      "controller_type": "oculus_touch",
+      "binding_url": "bindings_oculus_touch.json"
+    },
+    {
+      "controller_type": "knuckles",
+      "binding_url": "bindings_knuckles.json"
+    }
+  ],
+  "action_sets": [
+    {
+      "name": "/actions/grip",
+      "usage": "single"
+    },
+    {
+      "name": "/actions/trigger",
+      "usage": "single"
+    },
+    {
+      "name": "/actions/simple",
+      "usage": "single"
+    }
+  ],
+  "actions": [
+    {
+      "name": "/actions/grip/in/talk",
+      "type": "boolean"
+    },
+    {
+      "name": "/actions/grip/in/copy",
+      "type": "boolean"
+    },
+    {
+      "name": "/actions/grip/in/paste",
+      "type": "boolean"
+    },
+    {
+      "name": "/actions/grip/in/select_all",
+      "type": "boolean"
+    },
+    {
+      "name": "/actions/grip/in/enter",
+      "type": "boolean"
+    },
+    {
+      "name": "/actions/trigger/in/talk",
+      "type": "boolean"
+    },
+    {
+      "name": "/actions/trigger/in/copy",
+      "type": "boolean"
+    },
+    {
+      "name": "/actions/trigger/in/paste",
+      "type": "boolean"
+    },
+    {
+      "name": "/actions/trigger/in/select_all",
+      "type": "boolean"
+    },
+    {
+      "name": "/actions/trigger/in/enter",
+      "type": "boolean"
+    },
+    {
+      "name": "/actions/simple/in/talk",
+      "type": "boolean"
+    },
+    {
+      "name": "/actions/simple/in/copy",
+      "type": "boolean"
+    },
+    {
+      "name": "/actions/simple/in/paste",
+      "type": "boolean"
+    },
+    {
+      "name": "/actions/simple/in/select_all",
+      "type": "boolean"
+    },
+    {
+      "name": "/actions/simple/in/enter",
+      "type": "boolean"
+    }
+  ],
+  "localization": [
+    {
+      "language_tag": "en_US",
+      "/actions/grip": "Grip combos",
+      "/actions/trigger": "Trigger combos",
+      "/actions/simple": "Simple",
+      "/actions/grip/in/talk": "Hold to talk",
+      "/actions/grip/in/copy": "Copy",
+      "/actions/grip/in/paste": "Paste",
+      "/actions/grip/in/select_all": "Select all",
+      "/actions/grip/in/enter": "Enter",
+      "/actions/trigger/in/talk": "Hold to talk",
+      "/actions/trigger/in/copy": "Copy",
+      "/actions/trigger/in/paste": "Paste",
+      "/actions/trigger/in/select_all": "Select all",
+      "/actions/trigger/in/enter": "Enter",
+      "/actions/simple/in/talk": "Hold to talk",
+      "/actions/simple/in/copy": "Copy",
+      "/actions/simple/in/paste": "Paste",
+      "/actions/simple/in/select_all": "Select all",
+      "/actions/simple/in/enter": "Enter"
+    }
+  ]
+}

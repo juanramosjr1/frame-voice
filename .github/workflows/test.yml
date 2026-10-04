@@ -1,0 +1,46 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        # ubuntu-24.04-arm uses the same kind of ARM chip family as the Steam Frame.
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: System packages
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q espeak-ng libegl1 libgl1 libxkbcommon0 \
+            libxkbcommon-x11-0 libfontconfig1 libdbus-1-3 linux-libc-dev
+
+      - name: Install with the real installer
+        run: bash install.sh
+
+      - name: Allow uinput and input devices for the end-to-end test
+        run: |
+          sudo modprobe uinput
+          sudo chmod 666 /dev/uinput
+          sudo chmod a+r /dev/input/event* || true
+          # new devices created by the test need to be readable too
+          echo 'KERNEL=="event*", SUBSYSTEM=="input", MODE="0666"' | sudo tee /etc/udev/rules.d/99-ci.rules
+          sudo udevadm control --reload-rules
+
+      - name: System check
+        run: ~/.local/share/frame-voice/venv/bin/frame-voice --check || true
+
+      - name: Tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+          FRAME_VOICE_E2E: "1"
+        run: |
+          VENV=~/.local/share/frame-voice/venv
+          $VENV/bin/pip install -q pytest
+          $VENV/bin/python -m pytest -v tests
