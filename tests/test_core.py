@@ -221,3 +221,24 @@ def test_steamvr_bindings_only_use_declared_actions():
 def test_frame_controller_is_first_default_binding():
     manifest = json.loads((SVR / "actions.json").read_text())
     assert manifest["default_bindings"][0]["controller_type"] == "frame_controller"
+
+
+def test_load_wav_resamples_and_mixes_to_mono(tmp_path):
+    import wave
+
+    import numpy as np
+
+    from frame_voice.voice import load_wav
+
+    path = tmp_path / "a.wav"
+    t = np.arange(22050) / 22050
+    tone = (np.sin(2 * np.pi * 440 * t) * 16000).astype("<i2")
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(2)
+        w.setsampwidth(2)
+        w.setframerate(22050)
+        w.writeframes(np.repeat(tone, 2).tobytes())
+    audio = load_wav(str(path))
+    assert audio.dtype == np.float32
+    assert abs(len(audio) - 16000) <= 1
+    assert 0.45 < float(np.abs(audio).max()) < 0.5
