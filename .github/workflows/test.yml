@@ -13,7 +13,7 @@ jobs:
         runner: [ubuntu-24.04, ubuntu-24.04-arm]
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: System packages
         run: |
@@ -34,7 +34,9 @@ jobs:
           sudo udevadm control --reload-rules
 
       - name: System check
-        run: ~/.local/share/frame-voice/venv/bin/frame-voice --check || true
+        run: |
+          ~/.local/share/frame-voice/venv/bin/frame-voice --check 2>&1 | tee check.log || true
+          grep -E "^\s+(OK|FIX)" check.log | sed 's/^ */::notice title=check::/' || true
 
       - name: Tests
         env:
@@ -43,4 +45,11 @@ jobs:
         run: |
           VENV=~/.local/share/frame-voice/venv
           $VENV/bin/pip install -q pytest
-          $VENV/bin/python -m pytest -v tests
+          set +e
+          $VENV/bin/python -m pytest -rA --tb=short -p no:cacheprovider tests 2>&1 | tee pytest.log
+          status=${PIPESTATUS[0]}
+          # Surface results as annotations so they're readable without the raw log.
+          grep -E "^(FAILED|ERROR) " pytest.log | head -10 | sed 's/^/::error title=test::/'
+          grep -E "^E +" pytest.log | head -10 | sed 's/^/::warning title=detail::/'
+          grep -E "heard:|passed|failed" pytest.log | tail -3 | sed 's/^/::notice title=result::/'
+          exit $status
