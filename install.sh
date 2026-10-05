@@ -14,6 +14,16 @@ VENV="$APP_DIR/venv"
 BIN="$HOME/.local/bin"
 
 bold() { printf '\n\033[1m%s\033[0m\n' "$*"; }
+# systemctl --user, reaching the real user session from the Frame's desktop too
+# (its terminals have their own runtime folder).
+usersctl() {
+  local rt="/run/user/$(id -u)"
+  if [[ -S "$rt/bus" ]]; then
+    XDG_RUNTIME_DIR="$rt" DBUS_SESSION_BUS_ADDRESS="unix:path=$rt/bus" systemctl --user "$@"
+  else
+    systemctl --user "$@"
+  fi
+}
 ok()   { printf '  \033[32m✓\033[0m %s\n' "$*"; }
 warn() { printf '  \033[33m!\033[0m %s\n' "$*"; }
 fail() { printf '\n\033[31mInstall stopped:\033[0m %s\n' "$*"; exit 1; }
@@ -115,9 +125,19 @@ Icon=frame-voice
 Categories=Utility;Accessibility;
 DESKTOP
 touch "${XDG_DATA_HOME:-$HOME/.local/share}/applications"  # a running Steam rescans its app list
-"$VENV/bin/frame-voice" --register >/dev/null 2>&1 || true
 ok "Added 'fuelCell Voice Typing' to your apps"
 
-printf '\n\033[1;32mAll done!\033[0m Open \033[1mfuelCell Voice Typing\033[0m from your apps.\n'
+# Stop a copy that's running (an older version), set up starting with SteamVR,
+# and start the new version in the background now if SteamVR is running.
+usersctl stop frame-voice.service >/dev/null 2>&1 || true
+pkill -f "frame-voice/venv/bin/(frame-voice|python[0-9.]* -m frame_voice)" 2>/dev/null || true
+REGISTERED="$("$VENV/bin/frame-voice" --register 2>/dev/null || true)"
+if [[ "$REGISTERED" == *"starts with SteamVR"* ]]; then
+  ok "Starts with SteamVR from now on"
+  usersctl start frame-voice.service >/dev/null 2>&1 && ok "Running in the background now"
+fi
+
+printf '\n\033[1;32mAll done!\033[0m The controller shortcuts run in the background whenever SteamVR runs.\n'
+printf 'Open \033[1mfuelCell Voice Typing\033[0m from your apps to see the window.\n'
 printf 'If it says shortcuts need a SteamVR setting, tap \033[1mTurn on\033[0m.\n'
 printf 'Check everything with:  ~/.local/bin/frame-voice --check\n\n'

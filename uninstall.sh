@@ -4,6 +4,18 @@ set -uo pipefail
 DATA="${XDG_DATA_HOME:-$HOME/.local/share}"
 CONF="${XDG_CONFIG_HOME:-$HOME/.config}"
 
+# Stop starting with SteamVR (the real user session, even from the Frame's desktop).
+rt="/run/user/$(id -u)"
+usersctl() {
+  if [[ -S "$rt/bus" ]]; then
+    XDG_RUNTIME_DIR="$rt" DBUS_SESSION_BUS_ADDRESS="unix:path=$rt/bus" systemctl --user "$@"
+  else
+    systemctl --user "$@"
+  fi
+}
+usersctl disable --now frame-voice.service >/dev/null 2>&1
+rm -f "$CONF/systemd/user/frame-voice.service" "$CONF/systemd/user/steamvr.service.wants/frame-voice.service"
+usersctl daemon-reload >/dev/null 2>&1
 pkill -f "frame-voice/venv/bin/(frame-voice|python[0-9.]* -m frame_voice)" 2>/dev/null
 # Remove the KDE window rule the app added (keeps your other rules).
 "$DATA/frame-voice/venv/bin/frame-voice" --remove-kwin-rule 2>/dev/null

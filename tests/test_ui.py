@@ -5,8 +5,9 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 QtWidgets = pytest.importorskip("PySide6.QtWidgets")
 
-from frame_voice import config, ui  # noqa: E402
-from frame_voice.app import LISTENING, READY  # noqa: E402
+from frame_voice import autostart, config, ui  # noqa: E402
+from frame_voice import log as log_mod  # noqa: E402
+from frame_voice.app import LISTENING, READY, WORKING  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -34,11 +35,13 @@ class FakeEngine:
     def hotkey(self, action, pressed):
         self.calls.append((action, pressed))
 
-    def retype_last(self):
-        self.calls.append("retype")
-
     def reload_model(self, model):
         self.calls.append(("model", model))
+
+
+@pytest.fixture(autouse=True)
+def state_dir(tmp_path, monkeypatch):
+    monkeypatch.setattr(log_mod, "STATE_DIR", tmp_path / "state")
 
 
 @pytest.fixture
@@ -49,17 +52,35 @@ def win(app, tmp_path):
     w.deleteLater()
 
 
-def test_edit_keys_send_shortcuts(win):
-    import time
+@pytest.fixture
+def quits(monkeypatch):
+    calls = []
+    monkeypatch.setattr(QtWidgets.QApplication, "quit", lambda: calls.append(True))
+    return calls
 
-    labels = {b.text(): b for b in win.keys}
-    assert list(labels) == ["Copy", "Paste", "Cut", "Select all", "Undo", "Delete", "Space", "Enter"]
-    labels["Copy"].click()
-    labels["Paste"].click()
-    deadline = time.monotonic() + 2
-    while len(win.engine.calls) < 2 and time.monotonic() < deadline:
-        time.sleep(0.01)
-    assert sorted(win.engine.calls) == ["copy", "paste"]
+
+class FakeLink:
+    def __init__(self, last_text=""):
+        self.last_text, self.alive = last_text, True
+        self.sent, self.closed, self.on_lost = [], False, None
+
+    def watch(self, on_lost):
+        self.on_lost = on_lost
+
+    def send_last(self, text):
+        self.sent.append(text)
+
+    def quit(self):
+        self.sent.append("quit")
+
+    def close(self):
+        self.closed, self.alive = True, False
+
+
+def test_window_is_just_the_mic_and_copy(win):
+    texts = sorted(b.text() for b in win.findChildren(QtWidgets.QAbstractButton) if b.text())
+    assert texts == ["Copy", "Turn on"]  # (Turn on only shows when SteamVR needs a setting)
+    assert win.turn_on.isHidden()
 
 
 def test_mic_toggles_and_states_update_text(win):
@@ -198,3 +219,92 @@ def test_badge_pixels(app):
 
     buf = render_pill("Listening...", "#ff4d5e", 512, 128)
     assert len(buf) == 512 * 128 * 4
+
+
+# -- sharing the work with the background copy ----------------------------------------
+def test_window_shows_the_background_copys_last_dictation(win):
+    link = FakeLink("said in the background")
+    win.on_linked(link)
+    assert win.link is link and link.on_lost is not None
+    assert "said in the background" in win.last.text() and win.copy_text.isEnabled()
+    assert win.engine.last_text == "said in the background"  # so Copy copies it
+    win.on_transcript("said in the window")
+    assert link.sent == ["said in the window"]  # the background copy remembers it too
+
+
+def test_shortcuts_start_after_looking_for_the_background_copy(win):
+    started = []
+    win.vr.start = lambda: started.append(True)
+    win.on_linked(None)
+    win.on_linked(None)
+    assert started == [True] and win.link is None
+
+
+def test_closing_the_window_hands_back_to_the_background_copy(win, quits):
+    win.present(fade=False)
+    win.on_linked(FakeLink())
+    win.close()
+    assert win.isHidden() and quits == [True]
+
+
+def test_closing_with_no_background_copy_starts_it(win, quits, app, monkeypatch):
+    import time
+
+    started = []
+    monkeypatch.setattr(autostart, "start_now", lambda: started.append(True) or True)
+    win.present(fade=False)
+    win.close()
+    deadline = time.monotonic() + 2
+    while not quits and time.monotonic() < deadline:
+        app.processEvents()
+    assert started == [True] and quits == [True]
+
+
+def test_closing_without_start_with_steamvr_keeps_running(win, quits, monkeypatch):
+    monkeypatch.setattr(autostart, "start_now", lambda: pytest.fail("shouldn't start it"))
+    win.cfg["autostart"] = False
+    win.present(fade=False)
+    win.close()
+    assert win.isHidden() and quits == []
+
+
+def test_hidden_window_leaves_the_shortcuts_to_a_new_background_copy(win, quits):
+    win.present(fade=False)
+    win.hide()  # closed earlier, still running for the shortcuts
+    link = FakeLink()
+    win.on_linked(link)
+    assert link.closed and win.link is None and quits == [True]
+
+
+def test_quit_app_stops_the_background_copy_too(win, quits):
+    link = FakeLink()
+    win.on_linked(link)
+    win.quit_app()
+    assert link.sent == ["quit"] and quits == [True]
+
+
+def test_quit_waits_for_a_dictation_to_finish(win, quits, app):
+    import time
+
+    win.engine.state = WORKING
+    win.quit_when_idle()
+    assert quits == []
+    win.engine.state = READY
+    deadline = time.monotonic() + 2
+    while not quits and time.monotonic() < deadline:
+        app.processEvents()
+    assert quits == [True]
+
+
+def test_show_requests_reach_the_window(win, app):
+    import time
+
+    shown = []
+    win.bring_back = lambda: shown.append(True)
+    win.bridge.show.disconnect()
+    win.bridge.show.connect(win.bring_back)
+    win.bridge.show.emit()  # from the request thread in real use
+    deadline = time.monotonic() + 1
+    while not shown and time.monotonic() < deadline:
+        app.processEvents()
+    assert shown == [True]

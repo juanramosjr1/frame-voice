@@ -50,6 +50,7 @@ class Engine:
         self.transcriber = None
         self.state = LOADING
         self.last_text = ""
+        self.paused = False  # the window's copy of the app has the shortcuts
         self._lock = threading.Lock()
         self._watcher = None
 
@@ -181,10 +182,6 @@ class Engine:
             self.typist.shortcut("enter")
         return focused
 
-    def retype_last(self):
-        if self.last_text and self.typist and self.state == READY:
-            threading.Thread(target=self._type, args=(self.last_text,), daemon=True).start()
-
     # -- buttons ----------------------------------------------------------
     def shortcut(self, name):
         if self.typist:
@@ -192,6 +189,8 @@ class Engine:
             self.typist.shortcut(name)
 
     def hotkey(self, action, pressed):
+        if self.paused:
+            return
         log.info("shortcut %s %s", action, "down" if pressed else "up")
         if action == "talk":
             # Hold to talk: press starts, release types.
@@ -312,6 +311,17 @@ def check():
         except Exception:
             print("  --    SteamVR isn't running right now (shortcuts need it).")
 
+    from . import autostart, service
+    if autostart.available():
+        line(autostart.enabled() or not cfg["autostart"],
+             "Starts with SteamVR" if autostart.enabled() else "Doesn't start with SteamVR",
+             "Run the installer again (or turn on 'Start automatically with SteamVR' "
+             "in Settings).")
+    running = service.status()
+    if running:
+        where = "the window has them" if running.get("windows") else running.get("summary", "")
+        print(f"  --    Running in the background (shortcuts: {where})")
+
     try:
         diag = json.loads(DIAG_PATH.read_text())
         print(f"\nController shortcuts (last seen by the app at {diag['time']}):\n  {diag['summary']}")
@@ -353,12 +363,13 @@ def main(argv=None):
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--check", action="store_true", help="check the setup and exit")
     parser.add_argument("--no-intro", action="store_true", help="skip the fuelCell intro")
-    parser.add_argument("--no-window", action="store_true",
-                        help="background only: controller shortcuts, no window")
     parser.add_argument("--background", action="store_true",
-                        help="start with the window hidden (opening the app shows it)")
+                        help="run the controller shortcuts without a window (SteamVR "
+                             "starts the app this way); opening the app shows the window")
+    parser.add_argument("--no-window", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--register", action="store_true",
-                        help="register with SteamVR (done automatically) and exit")
+                        help="register with SteamVR and set up starting with it, then exit "
+                             "(the installer does this)")
     parser.add_argument("--remove-kwin-rule", action="store_true", help=argparse.SUPPRESS)
     argv = sys.argv[1:] if argv is None else argv
     args = parser.parse_args(argv)
@@ -368,8 +379,11 @@ def main(argv=None):
     if args.check:
         sys.exit(check())
     if args.register:
+        from . import autostart
         from .vr import write_vrmanifest
         print(write_vrmanifest())
+        if autostart.set_enabled(config_mod.load()["autostart"]):
+            print(f"starts with SteamVR: {autostart.UNIT_DIR / autostart.UNIT}")
         return
     if args.remove_kwin_rule:
         from .focus import remove_kwin_rule
@@ -378,27 +392,16 @@ def main(argv=None):
 
     clean_steam_env(argv)
     info = session_info()
-    log.info("starting %s %s; session: %s", app_version(), " ".join(argv) or "(no options)",
+    log.info("starting %s %s%s; session: %s", app_version(), " ".join(argv) or "(no options)",
+             " (by systemd)" if os.environ.get("INVOCATION_ID") else "",
              ", ".join(f"{k}={v}" for k, v in info.items() if v))
     cfg = config_mod.load()
-    if args.no_window:
-        from .vr import SteamVR
-
-        engine = Engine(cfg)
-        vr = SteamVR(engine.hotkey, cfg["controller_preset"], on_status=print,
-                     edits=cfg["edit_shortcuts"], in_games=cfg["in_games"],
-                     autolaunch=cfg["autostart"])
-        engine.on_state = lambda s, m: (print(m), vr.show_state(s, m))
-        engine.load()
-        if cfg.get("keyboard_hotkeys"):
-            engine.start_hotkeys()
-        vr.start()
-        threading.Event().wait()
-        return
+    if args.background or args.no_window:
+        from .service import run_background
+        sys.exit(run_background(cfg, Engine))
 
     from .ui import run
-    sys.exit(run(cfg, Engine, show_intro=cfg["show_intro"] and not args.no_intro,
-                 background=args.background))
+    sys.exit(run(cfg, Engine, show_intro=cfg["show_intro"] and not args.no_intro))
 
 
 if __name__ == "__main__":

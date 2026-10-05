@@ -142,6 +142,9 @@ class SteamVR:
         self.autolaunch = autolaunch
         self.connected = False
         self._stop = False
+        # Set while the app's other copy (the one with the window) has the
+        # controllers: stay off SteamVR so nothing is typed twice.
+        self.hold = False
         self._badge = None   # (state, message) to show, set from the UI thread
         self._badge_dirty = False
         self._requests = []  # functions to run on the SteamVR thread
@@ -240,6 +243,12 @@ class SteamVR:
         self.vr = openvr
         waiting_logged = False
         while not self._stop:
+            if self.hold:
+                if self.status != "held":
+                    self._release_all()
+                    self._set_status("held", "Paused while the app's window has the shortcuts (or the app is starting).")
+                time.sleep(0.2)
+                continue
             try:
                 # "Background" never starts SteamVR; it just fails if it isn't running.
                 openvr.init(openvr.VRApplication_Background)
@@ -255,7 +264,7 @@ class SteamVR:
             waiting_logged = False
             try:
                 self.open(openvr)
-                while not self._stop and self.step():
+                while not self._stop and not self.hold and self.step():
                     time.sleep(1 / 60)
             except Exception as err:
                 log.exception("steamvr session error")
@@ -267,7 +276,8 @@ class SteamVR:
                     openvr.shutdown()
                 except Exception:
                     pass
-            time.sleep(3)
+            if not self.hold:
+                time.sleep(3)
 
     def _start_reader(self):
         if self.reader is None:
@@ -282,7 +292,7 @@ class SteamVR:
         shortcuts. It works from any session, since it's a local web socket."""
         self._start_reader()
         end = time.monotonic() + seconds
-        while not self._stop and time.monotonic() < end:
+        while not self._stop and not self.hold and time.monotonic() < end:
             read_only = bool(self.reader and self.reader.connected)
             self._emit(self.reader.buttons() if read_only else set())
             if read_only:

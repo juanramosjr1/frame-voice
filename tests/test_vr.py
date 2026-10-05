@@ -426,8 +426,6 @@ def test_read_only_shortcuts_while_steamvr_input_is_unreachable(monkeypatch):
 
 
 def test_button_reader_never_leaves_buttons_held_after_a_crash(monkeypatch):
-    import time
-
     from frame_voice import vrws
 
     reader = vrws.ButtonReader()
@@ -440,3 +438,36 @@ def test_button_reader_never_leaves_buttons_held_after_a_crash(monkeypatch):
     monkeypatch.setattr(vrws.time, "sleep", lambda s: setattr(reader, "_stop", True))
     reader._run()
     assert reader.connected is False and reader.buttons() == set()
+
+
+def test_steps_aside_while_the_window_copy_has_the_controllers(tmp_path, monkeypatch):
+    import sys
+    import time
+
+    monkeypatch.setattr(vr, "DIAG_PATH", tmp_path / "steamvr.json")
+    monkeypatch.setattr(vr, "write_vrmanifest", lambda: tmp_path / "x.vrmanifest")
+    fake = FakeOpenVR()
+    monkeypatch.setitem(sys.modules, "openvr", fake)
+    calls = []
+    svr = vr.SteamVR(lambda action, pressed: calls.append((action, pressed)), reader=FakeReader())
+
+    def wait_for(cond):
+        deadline = time.monotonic() + 3
+        while not cond():
+            assert time.monotonic() < deadline, "timed out"
+            time.sleep(0.01)
+
+    svr.hold = True
+    svr.start()
+    try:
+        wait_for(lambda: svr.status == "held")
+        assert fake.inits == []  # never even connects while held
+        svr.hold = False
+        wait_for(lambda: svr.connected)
+        fake.pressed = {"a", "b"}
+        wait_for(lambda: ("talk", True) in calls)
+        svr.hold = True  # the window opened mid-press
+        wait_for(lambda: svr.status == "held" and not svr.connected)
+        assert calls[-1] == ("talk", False) and fake.shutdowns >= 1
+    finally:
+        svr.stop()

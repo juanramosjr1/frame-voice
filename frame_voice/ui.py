@@ -1,4 +1,4 @@
-"""The window: fuelCell intro, big mic button, edit keys and settings."""
+"""The window: fuelCell intro, big mic button, last dictation and settings."""
 
 import math
 import os
@@ -11,14 +11,13 @@ from PySide6.QtCore import (QEasingCurve, QEvent, QObject, QPointF, QProcess, QR
 from PySide6.QtGui import (QColor, QFont, QFontMetricsF, QGuiApplication, QIcon,
                            QLinearGradient, QPainter, QPainterPath, QPen, QPixmap,
                            QRadialGradient)
-from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (QAbstractButton, QApplication, QButtonGroup, QCheckBox,
-                               QDialog, QFrame, QGridLayout, QHBoxLayout, QLabel,
+                               QDialog, QFrame, QHBoxLayout, QLabel,
                                QPlainTextEdit, QPushButton, QToolButton, QVBoxLayout,
                                QWidget)
 
+from . import autostart, focus, service
 from . import config as config_mod
-from . import focus
 from .app import ERROR, LISTENING, LOADING, READY, WORKING
 from .log import log
 from .vr import BUTTON_LABELS, BUTTONS, PRESETS, SteamVR, preset_hint
@@ -46,19 +45,18 @@ QLabel {{ background: transparent; }}
 #card {{ background: {CARD}; border: 1px solid {BORDER}; border-radius: 16px; }}
 #cardTitle {{ color: {MUTED}; font-size: 12px; font-weight: 700; letter-spacing: 1.5px; }}
 #lastText {{ font-size: 17px; }}
-QToolButton#key {{
-    background: {CARD}; border: 1px solid {BORDER}; border-radius: 16px;
-    color: {TEXT}; font-size: 15px; font-weight: 600; padding: 12px 4px 10px 4px;
-}}
-QToolButton#key:hover {{ background: {CARD_HOVER}; border-color: #2f3849; }}
-QToolButton#key:pressed {{ background: {CARD_PRESS}; border-color: {ACCENT}; }}
-QToolButton#key:disabled {{ color: #4b5263; }}
 QPushButton#small {{
     background: {CARD_HOVER}; border: 1px solid {BORDER}; border-radius: 10px;
     color: {TEXT}; font-size: 14px; font-weight: 600; padding: 8px 14px;
 }}
 QPushButton#small:hover {{ border-color: {ACCENT}; }}
 QPushButton#small:disabled {{ color: #4b5263; }}
+QPushButton#copy {{
+    background: #12322c; border: 1px solid {ACCENT}; border-radius: 12px;
+    color: {TEXT}; font-size: 15px; font-weight: 700; padding: 10px 20px;
+}}
+QPushButton#copy:hover {{ background: #174038; }}
+QPushButton#copy:disabled {{ background: {CARD_HOVER}; border-color: {BORDER}; color: #4b5263; }}
 QToolButton#gear {{ background: transparent; border: none; border-radius: 20px; }}
 QToolButton#gear:hover {{ background: {CARD}; }}
 QPushButton#seg {{
@@ -127,64 +125,6 @@ def draw_icon(name, size=30, color=TEXT):
         path.lineTo(5, 6.5)
         path.quadTo(5, 4, 7.5, 4)
         path.lineTo(15, 4)
-    elif name == "paste":
-        p.drawRoundedRect(QRectF(5, 5, 14, 16), 2.5, 2.5)
-        p.drawRoundedRect(QRectF(9, 3, 6, 4), 1.5, 1.5)
-        path.moveTo(9, 12)
-        path.lineTo(15, 12)
-        path.moveTo(9, 16)
-        path.lineTo(13, 16)
-    elif name == "cut":
-        p.drawEllipse(QPointF(7, 17.5), 2.8, 2.8)
-        p.drawEllipse(QPointF(17, 17.5), 2.8, 2.8)
-        path.moveTo(9, 15.5)
-        path.lineTo(18, 4)
-        path.moveTo(15, 15.5)
-        path.lineTo(6, 4)
-    elif name == "select_all":
-        dash = QPen(pen)
-        dash.setDashPattern([2.0, 1.6])
-        p.setPen(dash)
-        p.drawRoundedRect(QRectF(3.5, 5, 17, 14), 2, 2)
-        p.setPen(pen)
-        path.moveTo(7.5, 10)
-        path.lineTo(16.5, 10)
-        path.moveTo(7.5, 14)
-        path.lineTo(13.5, 14)
-    elif name == "undo":
-        path.moveTo(8, 5)
-        path.lineTo(4, 9)
-        path.lineTo(8, 13)
-        path.moveTo(4, 9)
-        path.lineTo(14, 9)
-        path.cubicTo(22, 9, 22, 20, 14, 20)
-        path.lineTo(9, 20)
-    elif name == "backspace":
-        path.moveTo(9, 5)
-        path.lineTo(20, 5)
-        path.quadTo(21.5, 5, 21.5, 6.5)
-        path.lineTo(21.5, 17.5)
-        path.quadTo(21.5, 19, 20, 19)
-        path.lineTo(9, 19)
-        path.lineTo(2.5, 12)
-        path.closeSubpath()
-        path.moveTo(12, 9)
-        path.lineTo(17, 15)
-        path.moveTo(17, 9)
-        path.lineTo(12, 15)
-    elif name == "space":
-        path.moveTo(3, 11)
-        path.lineTo(3, 16)
-        path.lineTo(21, 16)
-        path.lineTo(21, 11)
-    elif name == "enter":
-        path.moveTo(20, 5)
-        path.lineTo(20, 13)
-        path.quadTo(20, 15, 18, 15)
-        path.lineTo(5, 15)
-        path.moveTo(9, 11)
-        path.lineTo(5, 15)
-        path.lineTo(9, 19)
     elif name == "gear":
         p.drawEllipse(QPointF(12, 12), 3.0, 3.0)
         pts = []
@@ -578,7 +518,7 @@ class Settings(QDialog):
         row.addWidget(check_btn)
         quit_btn = QPushButton("Quit app")
         quit_btn.setObjectName("small")
-        quit_btn.clicked.connect(QApplication.quit)
+        quit_btn.clicked.connect(getattr(parent, "quit_app", None) or QApplication.quit)
         row.addWidget(quit_btn)
         row.addStretch()
         done = QPushButton("Done")
@@ -638,9 +578,11 @@ class Settings(QDialog):
         self.parent().update_controller_hint()
 
     def _autostart(self):
+        on = self.cfg["autostart"]
         if self.vr:
-            self.vr.set_autolaunch(self.cfg["autostart"])
-        if not self.cfg["autostart"]:
+            self.vr.set_autolaunch(on)
+        threading.Thread(target=autostart.set_enabled, args=(on,), daemon=True).start()
+        if not on:
             config_mod.remove_desktop_autostart()
 
     def _turn_on(self):
@@ -706,12 +648,10 @@ class Bridge(QObject):
     state = Signal(str, str)
     transcript = Signal(str)
     vr_status = Signal(str)
-
-
-KEYS = [
-    ("copy", "Copy"), ("paste", "Paste"), ("cut", "Cut"), ("select_all", "Select all"),
-    ("undo", "Undo"), ("backspace", "Delete"), ("space", "Space"), ("enter", "Enter"),
-]
+    linked = Signal(object)  # a service.Link, or None
+    unlinked = Signal()
+    quit = Signal()
+    show = Signal()
 
 
 class MainWindow(QWidget):
@@ -729,12 +669,19 @@ class MainWindow(QWidget):
         self._window_ids = ()
         self._shown = False
         self._plain_ready = False  # the hint shows the usual "how to talk" text
+        self.link = None  # to the background copy, while one runs
+        self._linking = False
+        self._vr_started = False
         self.bridge = Bridge()
         self.engine = engine_cls(cfg, on_state=self.bridge.state.emit,
                                  on_transcript=self.bridge.transcript.emit,
                                  before_input=self.give_focus_back)
         self.bridge.state.connect(self.on_state)
         self.bridge.transcript.connect(self.on_transcript)
+        self.bridge.linked.connect(self.on_linked)
+        self.bridge.unlinked.connect(self.on_unlinked)
+        self.bridge.quit.connect(self.quit_when_idle)
+        self.bridge.show.connect(self.bring_back)
         QApplication.instance().installEventFilter(self)
         self.vr = SteamVR(self.on_controller, cfg["controller_preset"],
                           on_status=self.bridge.vr_status.emit, edits=cfg["edit_shortcuts"],
@@ -794,20 +741,20 @@ class MainWindow(QWidget):
         cl.setContentsMargins(16, 12, 12, 12)
         cl.setSpacing(6)
         top = QHBoxLayout()
-        t = QLabel("LAST TYPED")
+        t = QLabel("LAST DICTATION")
         t.setObjectName("cardTitle")
         top.addWidget(t)
         top.addStretch()
-        self.again = QPushButton("Type again")
-        self.copy_text = QPushButton("Copy text")
-        for b in (self.again, self.copy_text):
-            b.setObjectName("small")
-            b.setFocusPolicy(Qt.NoFocus)
-            b.setCursor(Qt.PointingHandCursor)
-            b.setEnabled(False)
-            top.addWidget(b)
-        self.again.clicked.connect(self.engine.retype_last)
+        # Copy it again any time (the clipboard may have moved on since).
+        self.copy_text = QPushButton("Copy")
+        self.copy_text.setObjectName("copy")
+        self.copy_text.setIcon(draw_icon("copy", 18))
+        self.copy_text.setIconSize(QSize(18, 18))
+        self.copy_text.setFocusPolicy(Qt.NoFocus)
+        self.copy_text.setCursor(Qt.PointingHandCursor)
+        self.copy_text.setEnabled(False)
         self.copy_text.clicked.connect(self.copy_last)
+        top.addWidget(self.copy_text)
         cl.addLayout(top)
         self.last = QLabel("Nothing yet")
         self.last.setObjectName("lastText")
@@ -815,26 +762,6 @@ class MainWindow(QWidget):
         self.last.setStyleSheet(f"color: {MUTED};")
         cl.addWidget(self.last)
         root.addWidget(card)
-        root.addSpacing(14)
-
-        # edit keys
-        grid = QGridLayout()
-        grid.setSpacing(10)
-        self.keys = []
-        for i, (action, label) in enumerate(KEYS):
-            b = QToolButton()
-            b.setObjectName("key")
-            b.setText(label)
-            b.setIcon(draw_icon(action, 26))
-            b.setIconSize(QSize(26, 26))
-            b.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
-            b.setFocusPolicy(Qt.NoFocus)
-            b.setCursor(Qt.PointingHandCursor)
-            b.setMinimumSize(96, 84)
-            b.clicked.connect(lambda _=False, a=action: self.run_shortcut(a))
-            grid.addWidget(b, i // 4, i % 4)
-            self.keys.append(b)
-        root.addLayout(grid)
         root.addSpacing(14)
 
         # controller shortcut hint
@@ -862,7 +789,62 @@ class MainWindow(QWidget):
 
     def start(self):
         threading.Thread(target=self._load, daemon=True).start()
-        self.vr.start()
+        # The shortcuts start once the background copy (if one runs) knows
+        # to step aside.
+        self.find_background()
+        self._link_timer = QTimer(self)
+        self._link_timer.timeout.connect(self.find_background)
+        self._link_timer.start(2000)
+
+    # -- sharing the work with the background copy ----------------------------
+    def find_background(self):
+        if self.link or self._linking:
+            return
+        self._linking = True
+        threading.Thread(target=lambda: self.bridge.linked.emit(service.Link.open()),
+                         daemon=True).start()
+
+    def on_linked(self, link):
+        self._linking = False
+        if not self._vr_started:
+            self._vr_started = True
+            self.vr.start()
+        if link is None:
+            return
+        if self._shown and not self.isVisible():
+            # The window was closed and this copy only kept running for the
+            # shortcuts, which the background copy can do now.
+            link.close()
+            log.info("a background copy started; leaving the shortcuts to it")
+            self.quit_when_idle()
+            return
+        self.link = link
+        link.watch(self.bridge.unlinked.emit)
+        log.info("the background copy stepped aside while the window is open")
+        if link.last_text and not self.engine.last_text:
+            self.engine.last_text = link.last_text
+            self.show_last(link.last_text)
+
+    def on_unlinked(self):
+        self.link = None
+
+    def quit_app(self):
+        """Settings > Quit app: stop the background copy too."""
+        if self.link:
+            self.link.quit()
+        self.quit_when_idle()
+
+    def quit_when_idle(self):
+        """Quit, but let a dictation that's being typed finish first."""
+        if self.engine.state in (LISTENING, WORKING):
+            QTimer.singleShot(200, self.quit_when_idle)
+        else:
+            QApplication.quit()
+
+    def _hand_back(self):
+        """After the window closes: start the background copy, then quit."""
+        if autostart.start_now():
+            self.bridge.quit.emit()
 
     def _load(self):
         self.engine.load()
@@ -933,23 +915,23 @@ class MainWindow(QWidget):
             hint = message
         self.status.setText(title)
         self.hint.setText(hint)
-        ok = state not in (LOADING, ERROR)
-        for b in self.keys:
-            b.setEnabled(ok)
-        self.again.setEnabled(ok and bool(self.engine.last_text))
 
     def on_transcript(self, text):
         QGuiApplication.clipboard().setText(text)
+        self.show_last(text)
+        if self.link:
+            self.link.send_last(text)
+
+    def show_last(self, text):
         self.last.setText(f"“{text}”")
         self.last.setStyleSheet(f"color: {TEXT};")
-        self.again.setEnabled(True)
         self.copy_text.setEnabled(True)
 
     def copy_last(self):
         if self.engine.last_text:
             QGuiApplication.clipboard().setText(self.engine.last_text)
             self.copy_text.setText("Copied!")
-            QTimer.singleShot(1200, lambda: self.copy_text.setText("Copy text"))
+            QTimer.singleShot(1200, lambda: self.copy_text.setText("Copy"))
 
     # -- keeping keys out of our own window ---------------------------------
     def changeEvent(self, event):
@@ -983,14 +965,16 @@ class MainWindow(QWidget):
         log.warning("couldn't hand focus back")
         return False
 
-    def run_shortcut(self, action):
-        threading.Thread(target=self.engine.shortcut, args=(action,), daemon=True).start()
-
     def closeEvent(self, event):
-        # Keep running so controller shortcuts keep working; opening the app
-        # again brings this window back. Settings has a Quit button.
+        # The shortcuts keep working after the window closes: the background
+        # copy takes them back, or else this copy keeps running hidden and
+        # opening the app brings the window back. Settings has Quit app.
         event.ignore()
         self.hide()
+        if self.link and self.link.alive:
+            self.quit_when_idle()
+        elif self.cfg["autostart"]:
+            threading.Thread(target=self._hand_back, daemon=True).start()
 
     def present(self, fade=True):
         """Show the window (centred the first time), fading in."""
@@ -1021,7 +1005,16 @@ class MainWindow(QWidget):
             self._testing = False
 
 
-def run(cfg, engine_cls, show_intro=True, background=False):
+def run(cfg, engine_cls, show_intro=True):
+    """The copy of the app with the window. One runs at a time: opening the
+    app again shows its window."""
+    if not service.hold_lock("window"):
+        if service.ask_window() != "bye":
+            return 0
+        # That copy was in the other session (the Steam session or the Frame's
+        # desktop) and is quitting, so the window can open here instead.
+        if not service.wait_for_lock("window", 10):
+            return 0
     # Under XWayland the "never take focus" hint is honoured reliably.
     if os.environ.get("DISPLAY") and "QT_QPA_PLATFORM" not in os.environ:
         os.environ["QT_QPA_PLATFORM"] = "xcb"
@@ -1033,31 +1026,19 @@ def run(cfg, engine_cls, show_intro=True, background=False):
     app.setStyleSheet(STYLE)
     app.setWindowIcon(app_icon())
 
-    # Only one copy runs. Opening the app again just shows the window.
-    name = f"frame-voice-{os.getuid()}"
-    probe = QLocalSocket()
-    probe.connectToServer(name)
-    if probe.waitForConnected(300):
-        probe.write(b"show")
-        probe.flush()
-        probe.waitForBytesWritten(300)
-        return 0
-    QLocalServer.removeServer(name)
-    server = QLocalServer(app)
-    server.listen(name)
-
     win = MainWindow(cfg, engine_cls)
-    server.newConnection.connect(lambda: (server.nextPendingConnection(), win.bring_back()))
+    requests = service.WindowServer(on_show=win.bridge.show.emit, on_move=win.bridge.quit.emit)
+    requests.start()
     win.start()  # load the speech model while the intro plays
     # On KDE, make sure clicking our window never moves keyboard focus.
     threading.Thread(target=focus.install_kwin_rule, daemon=True).start()
 
-    if background:
-        pass  # started by SteamVR: shortcuts only until the app is opened
-    elif show_intro:
+    if show_intro:
         intro = Intro()
         intro.finished.connect(win.present)
         intro.start()
     else:
         win.present()
-    return app.exec()
+    code = app.exec()
+    requests.close()
+    return code

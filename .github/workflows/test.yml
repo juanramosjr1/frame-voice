@@ -38,6 +38,35 @@ jobs:
           ~/.local/share/frame-voice/venv/bin/frame-voice --check 2>&1 | tee check.log || true
           grep -E "^\s+(OK|FIX)" check.log | sed 's/^ */::notice title=check::/' || true
 
+      - name: Starts and stops with SteamVR (a real user session, stand-in SteamVR service)
+        run: |
+          sudo loginctl enable-linger "$(id -un)"
+          export XDG_RUNTIME_DIR=/run/user/$(id -u)
+          for i in $(seq 30); do [ -S "$XDG_RUNTIME_DIR/bus" ] && break; sleep 1; done
+          # SteamOS on the Frame runs SteamVR as this user service.
+          mkdir -p ~/.config/systemd/user
+          printf '[Unit]\nDescription=stand-in for SteamVR\n[Service]\nExecStart=/bin/sleep infinity\n' \
+            > ~/.config/systemd/user/steamvr.service
+          systemctl --user daemon-reload
+          VENV=~/.local/share/frame-voice/venv
+          $VENV/bin/frame-voice --register
+          systemctl --user is-enabled frame-voice.service
+          systemctl --user start steamvr.service
+          for i in $(seq 60); do
+            check=$($VENV/bin/frame-voice --check 2>&1 || true)
+            grep -q "Running in the background" <<<"$check" && break
+            sleep 1
+          done
+          systemctl --user --no-pager status frame-voice.service 2>&1 | head -5 || true
+          # fails the step if the background copy never answered
+          grep "Running in the background" <<<"$check" | sed 's/^ */::notice title=started with SteamVR::/'
+          systemctl --user stop steamvr.service
+          sleep 3
+          if systemctl --user is-active -q frame-voice.service; then
+            echo "::error title=autostart::still running after SteamVR stopped"; exit 1
+          fi
+          echo "::notice title=autostart::stopped with SteamVR"
+
       - name: Tests
         env:
           QT_QPA_PLATFORM: offscreen

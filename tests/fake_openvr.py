@@ -57,8 +57,16 @@ class FakeOpenVR:
         self.events = []
         self.frames = []             # per frame: {button: priority}
         self.autolaunch = []
+        self.inits = []              # VR_Init calls, by application type
+        self.shutdowns = 0
         self._sets = {}
         self._actions = {}
+
+    def init(self, kind):
+        self.inits.append(kind)
+
+    def shutdown(self):
+        self.shutdowns += 1
 
     # interface accessors
     def VRSystem(self):

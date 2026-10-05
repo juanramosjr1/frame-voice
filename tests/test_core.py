@@ -333,8 +333,6 @@ def test_kwin_rule_skipped_without_kde_tools(monkeypatch):
 
 
 def test_failed_kreadconfig_never_wipes_rules(monkeypatch):
-    import subprocess
-
     from frame_voice import focus
 
     conf = focus.KConfig()
