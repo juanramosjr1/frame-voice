@@ -458,7 +458,7 @@ class Settings(QDialog):
         self.engine = engine
         self.vr = vr
         self.setWindowTitle("Settings")
-        self.setMinimumWidth(460)
+        self.setMinimumWidth(860)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(24, 20, 24, 20)
         lay.setSpacing(10)
@@ -468,7 +468,16 @@ class Settings(QDialog):
         title.setFont(font(24, QFont.Bold))
         lay.addWidget(title)
 
-        lay.addWidget(self._section("SPEECH MODEL"))
+        # two columns, so it fits the Frame's desktop without scrolling
+        cols = QHBoxLayout()
+        cols.setSpacing(28)
+        left, right = QVBoxLayout(), QVBoxLayout()
+        for col in (left, right):
+            col.setSpacing(10)
+            cols.addLayout(col)
+        lay.addLayout(cols)
+
+        left.addWidget(self._section("SPEECH MODEL"))
         seg = QHBoxLayout()
         self.models = QButtonGroup(self)
         for name, label in config_mod.MODELS.items():
@@ -480,21 +489,21 @@ class Settings(QDialog):
             b.clicked.connect(lambda _=False, n=name: self._model(n))
             self.models.addButton(b)
             seg.addWidget(b)
-        lay.addLayout(seg)
+        left.addLayout(seg)
         note = QLabel("Fast is quickest. Most accurate is slower and downloads a bigger model.")
         note.setObjectName("hint")
         note.setWordWrap(True)
-        lay.addWidget(note)
+        left.addWidget(note)
 
-        lay.addWidget(self._section("TYPING"))
-        self._toggle(lay, "Add a space after each dictation", "add_space")
-        self._toggle(lay, "Press Enter after each dictation", "press_enter")
+        left.addWidget(self._section("TYPING"))
+        self._toggle(left, "Add a space after each dictation", "add_space")
+        self._toggle(left, "Press Enter after each dictation", "press_enter")
 
-        lay.addWidget(self._section("APP"))
-        self._toggle(lay, "Show the fuelCell intro", "show_intro")
-        self._toggle(lay, "Start automatically with SteamVR", "autostart", self._autostart)
+        left.addWidget(self._section("APP"))
+        self._toggle(left, "Show the fuelCell intro", "show_intro")
+        self._toggle(left, "Start automatically with SteamVR", "autostart", self._autostart)
 
-        lay.addWidget(self._section("CONTROLLER SHORTCUTS"))
+        right.addWidget(self._section("CONTROLLER SHORTCUTS"))
         seg2 = QHBoxLayout()
         self.presets = QButtonGroup(self)
         for key, (label, _hint) in PRESETS.items():
@@ -506,18 +515,18 @@ class Settings(QDialog):
             b.clicked.connect(lambda _=False, k=key: self._preset(k))
             self.presets.addButton(b)
             seg2.addWidget(b)
-        lay.addLayout(seg2)
+        right.addLayout(seg2)
         self.preset_hint = QLabel()
         self.preset_hint.setObjectName("hint")
         self.preset_hint.setWordWrap(True)
-        lay.addWidget(self.preset_hint)
-        self._toggle(lay, "Copy and paste shortcuts (Trigger + A, Y, X)", "edit_shortcuts",
+        right.addWidget(self.preset_hint)
+        self._toggle(right, "Copy and paste shortcuts (Trigger + A, Y, X)", "edit_shortcuts",
                      self._options)
-        self._toggle(lay, "Keep shortcuts on during VR games", "in_games", self._options)
+        self._toggle(right, "Keep shortcuts on during VR games", "in_games", self._options)
         custom = QPushButton("Customize buttons in SteamVR")
         custom.setObjectName("small")
         custom.clicked.connect(self._customize)
-        lay.addWidget(custom, 0, Qt.AlignLeft)
+        right.addWidget(custom, 0, Qt.AlignLeft)
         self._update_hint()
 
         # live controller test: press buttons and watch them light up
@@ -554,11 +563,14 @@ class Settings(QDialog):
         note = QLabel("While this is open, buttons only light up here.")
         note.setObjectName("hint")
         tl.addWidget(note)
-        lay.addWidget(test)
+        right.addWidget(test)
         self._refresh_test()
         self._test_timer = QTimer(self, interval=100)
         self._test_timer.timeout.connect(self._refresh_test)
         self._test_timer.start()
+
+        left.addStretch()
+        right.addStretch()
 
         row = QHBoxLayout()
         check_btn = QPushButton("Run system check")
@@ -581,7 +593,7 @@ class Settings(QDialog):
         self.output.setReadOnly(True)
         self.output.setMinimumHeight(170)
         self.output.hide()
-        lay.addWidget(self.output)
+        left.insertWidget(left.count() - 1, self.output)  # the left column has room
 
         # Nothing here takes keyboard focus, so stray typed keys can't press
         # a button (dictation typed into this window must never "click" Quit).

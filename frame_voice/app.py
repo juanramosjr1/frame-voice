@@ -193,6 +193,14 @@ class Engine:
             self.shortcut(action)
 
 
+def app_version():
+    try:
+        from importlib.metadata import version
+        return version("frame-voice")
+    except Exception:
+        return "dev"
+
+
 def session_info():
     """Which display session we're in. On the Frame, apps either run in the
     Steam (VR) session or inside the KDE desktop shown in VR, and typing and
@@ -203,7 +211,7 @@ def session_info():
     if "KDE" in env["XDG_CURRENT_DESKTOP"].upper() or env["XDG_RUNTIME_DIR"].endswith("nested_plasma"):
         env["session"] = "KDE desktop"
     elif env["DISPLAY"] or env["WAYLAND_DISPLAY"]:
-        env["session"] = "Steam / SteamVR"
+        env["session"] = "not KDE (on the Frame: the Steam session)"
     else:
         env["session"] = "no display"
     return env
@@ -256,7 +264,7 @@ def check():
         ok &= good
         print(("  OK    " if good else "  FIX   ") + text + (f"\n        -> {fix}" if not good and fix else ""))
 
-    print("fuelCell Voice Typing - system check\n")
+    print(f"fuelCell Voice Typing {app_version()} - system check\n")
     line(os.access("/dev/uinput", os.W_OK), "Can type into apps (/dev/uinput)",
          "Run install.sh again, then restart the headset.")
     cfg = config_mod.load()
@@ -362,7 +370,7 @@ def main(argv=None):
 
     clean_steam_env(argv)
     info = session_info()
-    log.info("starting %s; session: %s", " ".join(argv) or "(no options)",
+    log.info("starting %s %s; session: %s", app_version(), " ".join(argv) or "(no options)",
              ", ".join(f"{k}={v}" for k, v in info.items() if v))
     cfg = config_mod.load()
     if args.no_window:
