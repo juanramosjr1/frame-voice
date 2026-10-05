@@ -350,3 +350,11 @@ def test_show_requests_reach_the_window(win, app):
     while not shown and time.monotonic() < deadline:
         app.processEvents()
     assert shown == [True]
+
+
+def test_intro_has_no_off_switch(win, tmp_path):
+    s = ui.Settings(win, win.cfg, win.engine, win.vr)
+    labels = [b.text() for b in s.findChildren(QtWidgets.QCheckBox)]
+    assert not [t for t in labels if "intro" in t.lower()]  # it always plays
+    assert "show_intro" not in config.load(tmp_path / "none.json")
+    s.close()

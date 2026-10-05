@@ -439,7 +439,6 @@ class Settings(QDialog):
         self._toggle(left, "Press Enter after each dictation", "press_enter")
 
         left.addWidget(self._section("APP"))
-        self._toggle(left, "Show the fuelCell intro", "show_intro")
         self._toggle(left, "Start automatically with SteamVR", "autostart", self._autostart)
 
         right.addWidget(self._section("CONTROLLER SHORTCUTS"))

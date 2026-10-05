@@ -81,7 +81,7 @@ In every layout, **Trigger + A** pastes, **Trigger + Y** copies and **Trigger + 
 
 If you want different buttons, tap **Customize buttons in SteamVR**. That opens SteamVR's controller bindings screen for this app, where each of the app's buttons (A, B, X, Y, Trigger) can be moved to any button you like. If it doesn't open, go to **SteamVR Settings > Controllers > Manage Controller Bindings** and pick **fuelCell Voice Typing**.
 
-Settings also has: speech model (**Fast / Balanced / Most accurate**, picked once and used every time), add a space after each dictation, press Enter after each dictation, show the intro, and start automatically with SteamVR.
+Settings also has: speech model (**Fast / Balanced / Most accurate**, picked once and used every time), add a space after each dictation, press Enter after each dictation, and start automatically with SteamVR.
 
 ---
 

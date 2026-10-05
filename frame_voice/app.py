@@ -369,7 +369,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(prog="frame-voice", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--check", action="store_true", help="check the setup and exit")
-    parser.add_argument("--no-intro", action="store_true", help="skip the fuelCell intro")
+    parser.add_argument("--no-intro", action="store_true", help=argparse.SUPPRESS)  # tests only
     parser.add_argument("--background", action="store_true",
                         help="run the controller shortcuts without a window (SteamVR "
                              "starts the app this way); opening the app shows the window")
@@ -409,7 +409,7 @@ def main(argv=None):
         sys.exit(run_background(cfg, Engine))
 
     from .ui import run
-    sys.exit(run(cfg, Engine, show_intro=cfg["show_intro"] and not args.no_intro))
+    sys.exit(run(cfg, Engine, show_intro=not args.no_intro))  # the intro always plays
 
 
 if __name__ == "__main__":

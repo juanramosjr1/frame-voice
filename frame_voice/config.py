@@ -19,7 +19,6 @@ DEFAULTS = {
     "model": "base.en",
     "add_space": True,
     "press_enter": False,
-    "show_intro": True,
     "controller_preset": "ab",
     # Trigger + A / Y / X for paste / copy / select all.
     "edit_shortcuts": True,
