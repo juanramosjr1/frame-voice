@@ -190,10 +190,20 @@ class FakeEngine:
 class FakeVR:
     def __init__(self, on_action, preset, edits, in_games, autolaunch):
         self.preset, self.edits, self.in_games = preset, edits, in_games
-        self.hold = False
+        self.autolaunch = autolaunch
+        self._hold = False
         self.started = False
         self.status, self.summary = "on", "Hold A and B together"
         self.states = []
+
+    @property
+    def hold(self):
+        return self._hold
+
+    @hold.setter
+    def hold(self, on):  # the real one gets there from its own thread
+        self._hold = on
+        self.status = "held" if on else "on"
 
     def start(self):
         self.started = True
@@ -241,13 +251,15 @@ def test_background_copy_steps_aside_for_the_window_and_picks_up_new_settings():
         assert "cancel" in bg.engine.calls  # a dictation in progress is dropped, not typed
         # the window changes the settings, then closes
         cfg = config.load()
-        cfg.update(controller_preset="hold_b", edit_shortcuts=False, model="small.en")
+        cfg.update(controller_preset="hold_b", edit_shortcuts=False, model="small.en",
+                   autostart=False)
         config.save(cfg)
         link.close()
         wait_for(lambda: not bg.vr.hold)
         assert not bg.engine.paused
         assert bg.vr.preset == "hold_b" and bg.vr.edits is False
         assert ("model", "small.en") in bg.engine.calls
+        assert bg.vr.autolaunch is False  # turning off "Start automatically" sticks
     finally:
         bg.server.close()
 
@@ -261,6 +273,37 @@ def test_window_opening_during_the_grace_time_keeps_the_background_copy_off():
         assert bg.vr.hold and bg.ready
         link.close()
         wait_for(lambda: not bg.vr.hold)
+    finally:
+        bg.server.close()
+
+
+def test_window_that_came_and_went_skips_the_grace_time():
+    bg = make_background(grace=30)
+    bg.start()
+    try:
+        link = service.Link.open()  # the closing window that started this copy
+        link.close()
+        wait_for(lambda: not bg.vr.hold)
+    finally:
+        bg.server.close()
+
+
+def test_answer_waits_until_the_background_copy_is_off_steamvr():
+    bg = make_background()
+    bg.start()
+    try:
+        wait_for(lambda: not bg.vr.hold)
+        order = []
+        real = bg._settle
+
+        def settle():
+            real()
+            order.append(bg.vr.status)
+
+        bg.server.settle = settle
+        link = service.Link.open()
+        assert order == ["held"]  # answered only after letting go of SteamVR
+        link.close()
     finally:
         bg.server.close()
 

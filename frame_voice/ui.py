@@ -518,7 +518,7 @@ class Settings(QDialog):
         row.addWidget(check_btn)
         quit_btn = QPushButton("Quit app")
         quit_btn.setObjectName("small")
-        quit_btn.clicked.connect(getattr(parent, "quit_app", None) or QApplication.quit)
+        quit_btn.clicked.connect(getattr(parent, "quit_app", None) or (lambda: QApplication.exit(0)))
         row.addWidget(quit_btn)
         row.addStretch()
         done = QPushButton("Done")
@@ -652,6 +652,7 @@ class Bridge(QObject):
     unlinked = Signal()
     quit = Signal()
     show = Signal()
+    handed_back = Signal()
 
 
 class MainWindow(QWidget):
@@ -682,6 +683,7 @@ class MainWindow(QWidget):
         self.bridge.unlinked.connect(self.on_unlinked)
         self.bridge.quit.connect(self.quit_when_idle)
         self.bridge.show.connect(self.bring_back)
+        self.bridge.handed_back.connect(self._after_hand_back)
         QApplication.instance().installEventFilter(self)
         self.vr = SteamVR(self.on_controller, cfg["controller_preset"],
                           on_status=self.bridge.vr_status.emit, edits=cfg["edit_shortcuts"],
@@ -788,7 +790,7 @@ class MainWindow(QWidget):
         self.adjustSize()
 
     def start(self):
-        threading.Thread(target=self._load, daemon=True).start()
+        self.load_engine()
         # The shortcuts start once the background copy (if one runs) knows
         # to step aside.
         self.find_background()
@@ -834,17 +836,29 @@ class MainWindow(QWidget):
             self.link.quit()
         self.quit_when_idle()
 
-    def quit_when_idle(self):
-        """Quit, but let a dictation that's being typed finish first."""
-        if self.engine.state in (LISTENING, WORKING):
-            QTimer.singleShot(200, self.quit_when_idle)
+    def quit_when_idle(self, waited=0):
+        """Quit. A dictation still being recorded is dropped; one being typed
+        gets up to 15 seconds to finish."""
+        if self.engine.state == LISTENING:
+            self.engine.cancel_talking()
+        if self.engine.state == WORKING and waited < 15000:
+            QTimer.singleShot(200, lambda: self.quit_when_idle(waited + 200))
         else:
-            QApplication.quit()
+            # exit(), not quit(): quit() would first close the window, and
+            # closing it means "keep the shortcuts running".
+            QApplication.exit(0)
 
     def _hand_back(self):
         """After the window closes: start the background copy, then quit."""
         if autostart.start_now():
-            self.bridge.quit.emit()
+            self.bridge.handed_back.emit()
+
+    def _after_hand_back(self):
+        if not self.isVisible():  # unless the window was opened again meanwhile
+            self.quit_when_idle()
+
+    def load_engine(self):
+        threading.Thread(target=self._load, daemon=True).start()
 
     def _load(self):
         self.engine.load()
@@ -893,7 +907,7 @@ class MainWindow(QWidget):
 
     def on_mic(self):
         if self.engine.state == ERROR:
-            self.start()  # retry
+            self.load_engine()  # retry
         else:
             self.engine.toggle_talking()
 
@@ -1013,7 +1027,7 @@ def run(cfg, engine_cls, show_intro=True):
             return 0
         # That copy was in the other session (the Steam session or the Frame's
         # desktop) and is quitting, so the window can open here instead.
-        if not service.wait_for_lock("window", 10):
+        if not service.wait_for_lock("window", 20):
             return 0
     # Under XWayland the "never take focus" hint is honoured reliably.
     if os.environ.get("DISPLAY") and "QT_QPA_PLATFORM" not in os.environ:

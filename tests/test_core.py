@@ -191,6 +191,23 @@ def test_talk_ignored_until_ready(tmp_path):
     assert not eng.recorder.recording
 
 
+def test_paused_engine_ignores_the_shortcuts(tmp_path):
+    eng, dev, _ = make_engine(tmp_path)
+    eng.paused = True  # the window's copy has them
+    eng.hotkey("talk", True)
+    eng.start_talking()
+    assert not eng.recorder.recording and eng.state == READY
+
+
+def test_paused_release_drops_a_racing_recording(tmp_path):
+    eng, dev, _ = make_engine(tmp_path)
+    eng.hotkey("talk", True)  # pressed just before the window opened
+    assert eng.state == LISTENING
+    eng.paused = True
+    eng.hotkey("talk", False)
+    assert eng.state == READY and not eng.recorder.recording and dev.events == []
+
+
 def test_no_permission_gives_friendly_error(tmp_path):
     def denied():
         raise PermissionError(13, "Permission denied")

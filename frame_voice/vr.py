@@ -602,7 +602,7 @@ class Badge:
             return
         from PySide6.QtGui import QGuiApplication
         if QGuiApplication.instance() is None:
-            return  # drawing text needs the Qt app (not running with --no-window)
+            return  # drawing text needs a Qt app
         try:
             buf = render_pill(text, color, self.W, self.H)
             self.overlay.setOverlayRaw(self.handle, buf, self.W, self.H, 4)

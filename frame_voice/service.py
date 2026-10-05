@@ -126,8 +126,9 @@ class Server:
     connects, on_window(False) when the last one is gone, or on_quit() instead
     when the window asked to quit the app altogether."""
 
-    def __init__(self, on_window, on_quit, status=dict):
+    def __init__(self, on_window, on_quit, status=dict, settle=lambda: None):
         self.on_window, self.on_quit, self.status = on_window, on_quit, status
+        self.settle = settle  # waits until the background copy is off the controllers
         self.last_text = ""
         self.windows = 0
         self._lock = threading.Lock()
@@ -178,6 +179,7 @@ class Server:
                 window = True
                 if self.windows == 1:
                     self.on_window(True)
+            self.settle()  # the window's copy starts its shortcuts when it gets the answer
             send(conn, {"last_text": self.last_text})
             conn.settimeout(None)
             while True:
@@ -225,7 +227,7 @@ class Link:
         self._send_lock = threading.Lock()
 
     @classmethod
-    def open(cls, timeout=2.0):
+    def open(cls, timeout=5.0):
         """Connect to the background copy; None if none is running."""
         sock = _connect(timeout)
         if sock is None:
@@ -362,12 +364,13 @@ class Background:
         self.on_quit = on_quit
         self.grace = grace
         self.ready = False  # the engine loaded and the grace time is over
+        self._handed_over = False  # a window's copy came and went
         self.engine = engine_cls(cfg, on_state=self._on_state, on_transcript=self._on_transcript)
         self.vr = vr_cls(self.engine.hotkey, cfg["controller_preset"], edits=cfg["edit_shortcuts"],
                          in_games=cfg["in_games"], autolaunch=cfg["autostart"])
         self.vr.hold = True
         self.engine.paused = True
-        self.server = Server(self._window_changed, self._quit, self._status)
+        self.server = Server(self._window_changed, self._quit, self._status, self._settle)
 
     def start(self):
         self.server.start()
@@ -379,7 +382,10 @@ class Background:
         self.engine.load()
         if self.engine.state != "error" and self.cfg.get("keyboard_hotkeys"):
             self.engine.start_hotkeys()
-        time.sleep(max(0.0, started + self.grace - time.monotonic()))
+        # No need to wait for a window that already came and went (it started
+        # this copy when it closed).
+        while not self._handed_over and time.monotonic() < started + self.grace:
+            time.sleep(0.05)
         self.ready = True
         with self.server._lock:
             self._apply()
@@ -390,15 +396,25 @@ class Background:
             log.info("the window is open; it has the shortcuts until it closes")
         else:
             log.info("the window closed; the shortcuts run in the background again")
+            self._handed_over = True
             self._reload_settings()
         self._apply()
 
     def _apply(self):
         hold = not self.ready or self.server.has_window()
-        if hold and not self.engine.paused:
-            self.engine.cancel_talking()
+        # Pause first, then drop a dictation in progress: a press racing this
+        # finds the engine paused (it checks under its lock).
         self.engine.paused = hold
         self.vr.hold = hold
+        if hold:
+            self.engine.cancel_talking()
+
+    def _settle(self, timeout=2.0):
+        """Wait until this copy is off SteamVR, so the two copies are never
+        connected at once."""
+        end = time.monotonic() + timeout
+        while self.vr.status != "held" and time.monotonic() < end:
+            time.sleep(0.02)
 
     def _reload_settings(self):
         """The window may have changed the settings."""
@@ -407,6 +423,7 @@ class Background:
         self.cfg.update(new)
         self.vr.set_preset(new["controller_preset"])
         self.vr.set_options(edits=new["edit_shortcuts"], in_games=new["in_games"])
+        self.vr.autolaunch = new["autostart"]  # registered with SteamVR on reconnecting
         if new["model"] != model and self.engine.transcriber is not None:
             self.engine.reload_model(new["model"])
 
@@ -489,7 +506,7 @@ def run_background(cfg, engine_cls):
     app.setQuitOnLastWindowClosed(False)
     bridge = Bridge()
     bridge.copy.connect(lambda text: QGuiApplication.clipboard().setText(text))
-    bridge.quit.connect(app.quit)
+    bridge.quit.connect(lambda: app.exit(0))
     work = Background(cfg, engine_cls, copy=bridge.copy.emit, on_quit=bridge.quit.emit)
     work.start()
     code = app.exec()

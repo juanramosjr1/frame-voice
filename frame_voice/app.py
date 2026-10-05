@@ -106,7 +106,7 @@ class Engine:
     # -- talking ----------------------------------------------------------
     def start_talking(self):
         with self._lock:
-            if self.state != READY:
+            if self.state != READY or self.paused:
                 return
             try:
                 self.recorder.start()
@@ -190,6 +190,8 @@ class Engine:
 
     def hotkey(self, action, pressed):
         if self.paused:
+            if action == "talk" and not pressed:
+                self.cancel_talking()  # never left recording while the window has the shortcuts
             return
         log.info("shortcut %s %s", action, "down" if pressed else "up")
         if action == "talk":
@@ -319,7 +321,12 @@ def check():
              "in Settings).")
     running = service.status()
     if running:
-        where = "the window has them" if running.get("windows") else running.get("summary", "")
+        if running.get("windows"):
+            where = "the window has them now"
+        elif running.get("engine") == "loading" or running.get("shortcuts") == "held":
+            where = "starting up"
+        else:
+            where = running.get("summary", "")
         print(f"  --    Running in the background (shortcuts: {where})")
 
     try:
@@ -382,7 +389,8 @@ def main(argv=None):
         from . import autostart
         from .vr import write_vrmanifest
         print(write_vrmanifest())
-        if autostart.set_enabled(config_mod.load()["autostart"]):
+        on = config_mod.load()["autostart"]
+        if autostart.set_enabled(on) and on:
             print(f"starts with SteamVR: {autostart.UNIT_DIR / autostart.UNIT}")
         return
     if args.remove_kwin_rule:

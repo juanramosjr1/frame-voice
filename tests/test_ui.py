@@ -38,6 +38,11 @@ class FakeEngine:
     def reload_model(self, model):
         self.calls.append(("model", model))
 
+    def cancel_talking(self):
+        self.calls.append("cancel")
+        if self.state == LISTENING:
+            self.state = READY
+
 
 @pytest.fixture(autouse=True)
 def state_dir(tmp_path, monkeypatch):
@@ -47,6 +52,7 @@ def state_dir(tmp_path, monkeypatch):
 @pytest.fixture
 def win(app, tmp_path):
     w = ui.MainWindow(config.load(tmp_path / "c.json"), FakeEngine)
+    w.vr.start = lambda: None  # no real SteamVR connection in these tests
     yield w
     w.vr.stop()
     w.deleteLater()
@@ -55,7 +61,9 @@ def win(app, tmp_path):
 @pytest.fixture
 def quits(monkeypatch):
     calls = []
-    monkeypatch.setattr(QtWidgets.QApplication, "quit", lambda: calls.append(True))
+    monkeypatch.setattr(QtWidgets.QApplication, "exit", lambda code=0: calls.append(True))
+    # quit() closes the window first, which means "keep running in the background"
+    monkeypatch.setattr(QtWidgets.QApplication, "quit", lambda: pytest.fail("use exit()"))
     return calls
 
 
@@ -138,6 +146,7 @@ def test_settings_takes_no_focus_and_ignores_typed_keys(win, monkeypatch):
     assert takers == []
     quits = []
     monkeypatch.setattr(QtWidgets.QApplication, "quit", lambda: quits.append(True))
+    monkeypatch.setattr(QtWidgets.QApplication, "exit", lambda code=0: quits.append(True))
     s.show()
     for w in [s] + s.findChildren(QtWidgets.QWidget):
         for key, text in ((Qt.Key_Space, " "), (Qt.Key_Return, "\r"), (Qt.Key_Escape, "")):
@@ -279,11 +288,22 @@ def test_hidden_window_leaves_the_shortcuts_to_a_new_background_copy(win, quits)
 def test_quit_app_stops_the_background_copy_too(win, quits):
     link = FakeLink()
     win.on_linked(link)
+    win.present(fade=False)
     win.quit_app()
     assert link.sent == ["quit"] and quits == [True]
 
 
-def test_quit_waits_for_a_dictation_to_finish(win, quits, app):
+def test_quit_app_never_starts_the_background_copy(win, quits, monkeypatch):
+    monkeypatch.setattr(autostart, "start_now", lambda: pytest.fail("Quit app restarted it"))
+    win.present(fade=False)
+    s = ui.Settings(win, win.cfg, win.engine, win.vr)
+    quit_btn = [b for b in s.findChildren(QtWidgets.QPushButton) if b.text() == "Quit app"][0]
+    quit_btn.click()
+    assert quits == [True]
+    s.close()
+
+
+def test_quit_lets_typing_finish_but_drops_a_recording(win, quits, app):
     import time
 
     win.engine.state = WORKING
@@ -294,6 +314,28 @@ def test_quit_waits_for_a_dictation_to_finish(win, quits, app):
     while not quits and time.monotonic() < deadline:
         app.processEvents()
     assert quits == [True]
+    win.engine.state = LISTENING  # the mic is on: never wait for it
+    win.quit_when_idle()
+    assert "cancel" in win.engine.calls and quits == [True, True]
+
+
+def test_window_reopened_before_the_hand_back_finished_stays(win, quits):
+    win.present(fade=False)
+    win._after_hand_back()  # the window is showing again
+    assert quits == []
+    win.hide()
+    win._after_hand_back()
+    assert quits == [True]
+
+
+def test_retrying_after_an_error_only_reloads(win, monkeypatch):
+    loads = []
+    monkeypatch.setattr(win, "load_engine", lambda: loads.append(True))
+    monkeypatch.setattr(win, "find_background", lambda: pytest.fail("not again"))
+    from frame_voice.app import ERROR
+    win.engine.state = ERROR
+    win.on_mic()
+    assert loads == [True]
 
 
 def test_show_requests_reach_the_window(win, app):

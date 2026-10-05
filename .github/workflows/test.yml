@@ -39,6 +39,7 @@ jobs:
           grep -E "^\s+(OK|FIX)" check.log | sed 's/^ */::notice title=check::/' || true
 
       - name: Starts and stops with SteamVR (a real user session, stand-in SteamVR service)
+        shell: bash  # -eo pipefail, so a failed grep in a pipe fails the step
         run: |
           sudo loginctl enable-linger "$(id -un)"
           export XDG_RUNTIME_DIR=/run/user/$(id -u)
@@ -52,14 +53,16 @@ jobs:
           $VENV/bin/frame-voice --register
           systemctl --user is-enabled frame-voice.service
           systemctl --user start steamvr.service
-          for i in $(seq 60); do
+          # Up and past its start-up (no SteamVR here, so it waits for it).
+          for i in $(seq 90); do
             check=$($VENV/bin/frame-voice --check 2>&1 || true)
-            grep -q "Running in the background" <<<"$check" && break
+            grep -q "Running in the background (shortcuts: Waiting for SteamVR" <<<"$check" && break
             sleep 1
           done
           systemctl --user --no-pager status frame-voice.service 2>&1 | head -5 || true
-          # fails the step if the background copy never answered
-          grep "Running in the background" <<<"$check" | sed 's/^ */::notice title=started with SteamVR::/'
+          # fails the step if the background copy never got there
+          grep "Running in the background (shortcuts: Waiting for SteamVR" <<<"$check" \
+            | sed 's/^ */::notice title=started with SteamVR::/'
           systemctl --user stop steamvr.service
           sleep 3
           if systemctl --user is-active -q frame-voice.service; then
