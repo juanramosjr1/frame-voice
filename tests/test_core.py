@@ -2,6 +2,7 @@ import json
 import os
 import re
 import struct
+import time
 from pathlib import Path
 
 import pytest
@@ -90,7 +91,8 @@ def test_keywatcher_parses_events_and_ignores_repeat():
 def test_config_roundtrip_and_bad_values(tmp_path):
     path = tmp_path / "c.json"
     cfg = config.load(path)
-    assert cfg["model"] == "base.en" and cfg["controller_preset"] == "grip"
+    assert cfg["model"] == "base.en" and cfg["controller_preset"] == "ab"
+    assert cfg["after_talking"] == "type"
     cfg["press_enter"] = True
     cfg["hotkeys"]["talk"] = "F20"
     config.save(cfg, path)
@@ -101,6 +103,9 @@ def test_config_roundtrip_and_bad_values(tmp_path):
     assert config.load(path)["model"] == "base.en"
     path.write_text("{not json")
     assert config.load(path)["model"] == "base.en"
+    # the old "grip" layout no longer exists
+    path.write_text(json.dumps({"controller_preset": "grip"}))
+    assert config.load(path)["controller_preset"] == "ab"
 
 
 # -- engine ----------------------------------------------------------------------
@@ -122,11 +127,12 @@ class FakeRecorder:
         self.recording = False
 
 
-def make_engine(tmp_path, text="hello there", **cfg_over):
+def make_engine(tmp_path, text="hello there", focus_ok=True, **cfg_over):
     cfg = config.load(tmp_path / "none.json")
     cfg.update(cfg_over)
     dev = FakeDevice()
     states = []
+    transcripts = []
 
     class Tx:
         def __init__(self, model):
@@ -136,9 +142,12 @@ def make_engine(tmp_path, text="hello there", **cfg_over):
             assert os.path.exists(path)
             return text
 
-    eng = Engine(cfg, on_state=lambda s, m: states.append(s),
+    eng = Engine(cfg, on_state=lambda s, m: states.append((s, m)),
+                 on_transcript=transcripts.append,
                  typist_factory=lambda: Typist(dev, delay=0),
-                 recorder=FakeRecorder(tmp_path), transcriber_factory=Tx)
+                 recorder=FakeRecorder(tmp_path), transcriber_factory=Tx,
+                 before_input=lambda: focus_ok)
+    eng.transcripts = transcripts
     eng.load()
     return eng, dev, states
 
@@ -242,3 +251,56 @@ def test_load_wav_resamples_and_mixes_to_mono(tmp_path):
     assert audio.dtype == np.float32
     assert abs(len(audio) - 16000) <= 1
     assert 0.45 < float(np.abs(audio).max()) < 0.5
+
+
+def test_release_keeps_recording_briefly_then_types(tmp_path):
+    eng, dev, states = make_engine(tmp_path, "hi", add_space=False)
+    eng.hotkey("talk", True)
+    t0 = time.monotonic()
+    eng.hotkey("talk", False)
+    assert eng.state == "working"
+    while eng.state != READY and time.monotonic() - t0 < 3:
+        time.sleep(0.01)
+    assert time.monotonic() - t0 >= Engine.RELEASE_TAIL
+    assert typed(dev) == ["H", "I"] and eng.transcripts == ["hi"]
+
+
+def test_clipboard_only_mode_types_nothing(tmp_path):
+    eng, dev, states = make_engine(tmp_path, "hello", after_talking="clipboard")
+    eng._finish(eng.recorder.stop())
+    assert dev.events == [] and eng.transcripts == ["hello"]
+    assert states[-1] == (READY, "Copied. Paste it where you want it.")
+
+
+def test_never_types_into_our_own_window(tmp_path):
+    eng, dev, states = make_engine(tmp_path, "hello", focus_ok=False)
+    eng._finish(eng.recorder.stop())
+    eng.shortcut("paste")
+    assert dev.events == []
+    assert eng.transcripts == ["hello"]  # still copied, so it can be pasted
+    assert "paste" in states[-1][1]
+
+
+def test_basic_button_fallback():
+    from frame_voice.vr import BTN_A, BTN_B, BTN_TRIGGER, legacy_actions
+
+    a, b, t = 1 << BTN_A, 1 << BTN_B, 1 << BTN_TRIGGER
+    assert legacy_actions("ab", {"right": a | b}) == {"talk"}
+    assert legacy_actions("ab", {"right": b}) == set()
+    assert legacy_actions("trigger", {"right": t | b}) == {"talk"}
+    assert legacy_actions("hold_b", {"right": b}) == {"talk"}
+    assert legacy_actions("hold_b", {"left": t | a}) == {"paste"}
+    assert legacy_actions("ab", {}) == set()
+
+
+def test_every_preset_has_talk_paste_copy_select_all():
+    from frame_voice.vr import PRESETS
+
+    for entry in json.loads((SVR / "actions.json").read_text())["default_bindings"]:
+        b = json.loads((SVR / entry["binding_url"]).read_text())["bindings"]
+        for preset in PRESETS:
+            body = b[f"/actions/{preset}"]
+            outs = {c["output"].rsplit("/", 1)[1] for c in body.get("chords", [])}
+            outs |= {i["output"].rsplit("/", 1)[1] for s in body.get("sources", [])
+                     for i in s["inputs"].values()}
+            assert {"talk", "paste", "copy", "select_all"} <= outs, (entry, preset)

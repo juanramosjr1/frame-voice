@@ -87,6 +87,16 @@ fi
 # 5. Launcher ---------------------------------------------------------------------
 bold "5/5  Adding it to your apps"
 ln -sf "$VENV/bin/frame-voice" "$BIN/frame-voice"
+# Make the 'frame-voice' command work in new Konsole windows (SteamOS doesn't
+# put ~/.local/bin on PATH by default).
+for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
+  [[ "$rc" == "$HOME/.zshrc" && ! -f "$rc" ]] && continue
+  grep -qs 'frame-voice: add ~/.local/bin' "$rc" || cat >> "$rc" <<'RC'
+
+# frame-voice: add ~/.local/bin to PATH
+case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac
+RC
+done
 cp "$SRC/uninstall.sh" "$APP_DIR/uninstall.sh"
 ICON_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/scalable/apps"
 mkdir -p "$ICON_DIR" "${XDG_DATA_HOME:-$HOME/.local/share}/applications"
@@ -104,4 +114,5 @@ DESKTOP
 ok "Added 'fuelCell Voice Typing' to your apps"
 
 printf '\n\033[1;32mAll done!\033[0m Open \033[1mfuelCell Voice Typing\033[0m from your apps.\n'
-printf 'Check everything with:  frame-voice --check\n\n'
+printf 'Check everything with:  ~/.local/bin/frame-voice --check\n'
+printf '(In new Konsole windows, just  frame-voice --check  works too.)\n\n'

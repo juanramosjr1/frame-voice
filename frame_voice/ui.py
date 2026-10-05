@@ -6,8 +6,9 @@ import math
 import os
 import sys
 import threading
+import time
 
-from PySide6.QtCore import (QEasingCurve, QObject, QPointF, QRectF, QSize, Qt,
+from PySide6.QtCore import (QEasingCurve, QEvent, QObject, QPointF, QRectF, QSize, Qt,
                             QTimer, QVariantAnimation, Signal)
 from PySide6.QtGui import (QColor, QFont, QFontMetricsF, QGuiApplication, QIcon,
                            QLinearGradient, QPainter, QPainterPath, QPen, QPixmap,
@@ -19,7 +20,9 @@ from PySide6.QtWidgets import (QAbstractButton, QApplication, QButtonGroup, QChe
                                QWidget)
 
 from . import config as config_mod
+from . import focus
 from .app import ERROR, LISTENING, LOADING, READY, WORKING
+from .log import log
 from .vr import PRESETS, SteamVR
 
 # -- look -------------------------------------------------------------------
@@ -516,6 +519,35 @@ class Settings(QDialog):
         custom.clicked.connect(self._customize)
         lay.addWidget(custom, 0, Qt.AlignLeft)
 
+        # live controller test: press buttons and watch them light up
+        test = QFrame()
+        test.setObjectName("card")
+        tl = QVBoxLayout(test)
+        tl.setContentsMargins(14, 10, 14, 12)
+        tl.setSpacing(8)
+        tt = QLabel("TEST YOUR BUTTONS")
+        tt.setObjectName("cardTitle")
+        tl.addWidget(tt)
+        self.vr_line = QLabel("")
+        self.vr_line.setObjectName("hint")
+        self.vr_line.setWordWrap(True)
+        tl.addWidget(self.vr_line)
+        pills = QHBoxLayout()
+        self.pills = {}
+        for action, label in (("talk", "Talk"), ("copy", "Copy"), ("paste", "Paste"),
+                              ("select_all", "Select all")):
+            pill = QLabel(label)
+            pill.setAlignment(Qt.AlignCenter)
+            pill.setMinimumHeight(34)
+            self.pills[action] = pill
+            pills.addWidget(pill)
+        tl.addLayout(pills)
+        lay.addWidget(test)
+        self._refresh_test()
+        self._test_timer = QTimer(self, interval=100)
+        self._test_timer.timeout.connect(self._refresh_test)
+        self._test_timer.start()
+
         row = QHBoxLayout()
         check_btn = QPushButton("Run system check")
         check_btn.setObjectName("small")
@@ -546,6 +578,7 @@ class Settings(QDialog):
 
     def _toggle(self, lay, text, key):
         box = QCheckBox(text)
+        box.setFocusPolicy(Qt.NoFocus)
         box.setChecked(bool(self.cfg.get(key)))
         box.toggled.connect(lambda on: self._set(key, on))
         lay.addWidget(box)
@@ -565,6 +598,20 @@ class Settings(QDialog):
         if self.vr:
             self.vr.set_preset(key)
         self.parent().update_controller_hint()
+
+    def _refresh_test(self):
+        snap = self.vr.snapshot() if self.vr else {}
+        self.vr_line.setText(snap.get("summary", "SteamVR isn't connected."))
+        held = snap.get("held", set())
+        bound = snap.get("bound", {})
+        for action, pill in self.pills.items():
+            if action in held:
+                style = f"background: {ACCENT}; color: #04140f;"
+            elif bound.get(action):
+                style = f"background: {CARD_HOVER}; color: {TEXT};"
+            else:
+                style = f"background: transparent; color: #4b5263; border: 1px dashed {BORDER};"
+            pill.setStyleSheet(style + " border-radius: 10px; font-weight: 600;")
 
     def _customize(self):
         if not (self.vr and self.vr.open_bindings()):
@@ -610,11 +657,15 @@ class MainWindow(QWidget):
         self.setWindowTitle("fuelCell Voice Typing")
         self.setWindowIcon(app_icon())
         self.cfg = cfg
+        self._active = False  # read from worker threads
+        self._window_ids = ()
         self.bridge = Bridge()
         self.engine = engine_cls(cfg, on_state=self.bridge.state.emit,
-                                 on_transcript=self.bridge.transcript.emit)
+                                 on_transcript=self.bridge.transcript.emit,
+                                 before_input=self.give_focus_back)
         self.bridge.state.connect(self.on_state)
         self.bridge.transcript.connect(self.on_transcript)
+        QApplication.instance().installEventFilter(self)
         self.vr = SteamVR(self.engine.hotkey, cfg["controller_preset"],
                           on_status=self.bridge.vr_status.emit)
         self.bridge.vr_status.connect(self.on_vr_status)
@@ -638,6 +689,7 @@ class MainWindow(QWidget):
         gear.setIconSize(QSize(24, 24))
         gear.setFixedSize(40, 40)
         gear.setCursor(Qt.PointingHandCursor)
+        gear.setFocusPolicy(Qt.NoFocus)
         gear.setToolTip("Settings")
         gear.clicked.connect(self.open_settings)
         head.addWidget(mark)
@@ -708,7 +760,7 @@ class MainWindow(QWidget):
             b.setFocusPolicy(Qt.NoFocus)
             b.setCursor(Qt.PointingHandCursor)
             b.setMinimumSize(96, 84)
-            b.clicked.connect(lambda _=False, a=action: self.engine.shortcut(a))
+            b.clicked.connect(lambda _=False, a=action: self.run_shortcut(a))
             grid.addWidget(b, i // 4, i % 4)
             self.keys.append(b)
         root.addLayout(grid)
@@ -742,14 +794,14 @@ class MainWindow(QWidget):
 
     def on_vr_status(self, text):
         self.vr_text = text
-        on = text == "Controller shortcuts on"
+        on = text.startswith("Controller shortcuts on")
         color = ACCENT if on else MUTED
         self.vr_dot.setStyleSheet(f"background: {color}; border-radius: 5px;")
         self.update_controller_hint()
 
     def update_controller_hint(self):
         hint = PRESETS[self.cfg["controller_preset"]][1]
-        if self.vr_text == "Controller shortcuts on":
+        if self.vr_text.startswith("Controller shortcuts on"):
             self.controller.setText(hint)
         else:
             self.controller.setText(f"{self.vr_text}  Controller shortcuts start with SteamVR.")
@@ -783,6 +835,7 @@ class MainWindow(QWidget):
         self.again.setEnabled(ok and bool(self.engine.last_text))
 
     def on_transcript(self, text):
+        QGuiApplication.clipboard().setText(text)
         self.last.setText(f"“{text}”")
         self.last.setStyleSheet(f"color: {TEXT};")
         self.again.setEnabled(True)
@@ -793,6 +846,42 @@ class MainWindow(QWidget):
             QGuiApplication.clipboard().setText(self.engine.last_text)
             self.copy_text.setText("Copied!")
             QTimer.singleShot(1200, lambda: self.copy_text.setText("Copy text"))
+
+    # -- keeping keys out of our own window ---------------------------------
+    def changeEvent(self, event):
+        if event.type() == QEvent.ActivationChange:
+            self._active = self.isActiveWindow()
+        super().changeEvent(event)
+
+    def showEvent(self, event):
+        self._window_ids = (int(self.winId()),)
+        super().showEvent(event)
+
+    KEY_EVENTS = (QEvent.KeyPress, QEvent.KeyRelease, QEvent.ShortcutOverride)
+
+    def eventFilter(self, obj, event):
+        # Never react to typed keys: if our window ends up with focus, those
+        # keys were meant for another app (a space used to "click" Settings).
+        if event.type() in self.KEY_EVENTS and isinstance(obj, QWidget) and obj.window() is self:
+            return True
+        return False
+
+    def give_focus_back(self):
+        """Called from a worker thread right before keys are sent."""
+        if not self._active:
+            return True
+        log.info("our window is active; handing focus back before typing")
+        if focus.activate_previous(self._window_ids):
+            for _ in range(20):  # wait up to 1 s for the switch
+                if not self._active:
+                    time.sleep(0.05)  # let the other window settle
+                    return True
+                time.sleep(0.05)
+        log.warning("couldn't hand focus back")
+        return False
+
+    def run_shortcut(self, action):
+        threading.Thread(target=self.engine.shortcut, args=(action,), daemon=True).start()
 
     def closeEvent(self, event):
         # Keep running so controller shortcuts keep working; opening the app

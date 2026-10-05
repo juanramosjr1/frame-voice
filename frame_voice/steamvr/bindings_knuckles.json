@@ -1,28 +1,15 @@
 {
   "controller_type": "knuckles",
   "name": "fuelCell defaults (knuckles)",
-  "description": "Hold grip or trigger with a face button; or hold B / A",
+  "description": "Talk: A+B / Trigger+B / B. Trigger + A paste, Y copy, X select all.",
   "bindings": {
-    "/actions/grip": {
+    "/actions/ab": {
       "chords": [
         {
-          "output": "/actions/grip/in/talk",
+          "output": "/actions/ab/in/paste",
           "inputs": [
             [
-              "/user/hand/right/input/grip",
-              "click"
-            ],
-            [
-              "/user/hand/right/input/b",
-              "click"
-            ]
-          ]
-        },
-        {
-          "output": "/actions/grip/in/paste",
-          "inputs": [
-            [
-              "/user/hand/right/input/grip",
+              "/user/hand/right/input/trigger",
               "click"
             ],
             [
@@ -32,10 +19,10 @@
           ]
         },
         {
-          "output": "/actions/grip/in/copy",
+          "output": "/actions/ab/in/copy",
           "inputs": [
             [
-              "/user/hand/left/input/grip",
+              "/user/hand/left/input/trigger",
               "click"
             ],
             [
@@ -45,14 +32,27 @@
           ]
         },
         {
-          "output": "/actions/grip/in/select_all",
+          "output": "/actions/ab/in/select_all",
           "inputs": [
             [
-              "/user/hand/left/input/grip",
+              "/user/hand/left/input/trigger",
               "click"
             ],
             [
               "/user/hand/left/input/a",
+              "click"
+            ]
+          ]
+        },
+        {
+          "output": "/actions/ab/in/talk",
+          "inputs": [
+            [
+              "/user/hand/right/input/a",
+              "click"
+            ],
+            [
+              "/user/hand/right/input/b",
               "click"
             ]
           ]
@@ -61,19 +61,6 @@
     },
     "/actions/trigger": {
       "chords": [
-        {
-          "output": "/actions/trigger/in/talk",
-          "inputs": [
-            [
-              "/user/hand/right/input/trigger",
-              "click"
-            ],
-            [
-              "/user/hand/right/input/b",
-              "click"
-            ]
-          ]
-        },
         {
           "output": "/actions/trigger/in/paste",
           "inputs": [
@@ -112,26 +99,71 @@
               "click"
             ]
           ]
+        },
+        {
+          "output": "/actions/trigger/in/talk",
+          "inputs": [
+            [
+              "/user/hand/right/input/trigger",
+              "click"
+            ],
+            [
+              "/user/hand/right/input/b",
+              "click"
+            ]
+          ]
         }
       ]
     },
-    "/actions/simple": {
+    "/actions/hold_b": {
+      "chords": [
+        {
+          "output": "/actions/hold_b/in/paste",
+          "inputs": [
+            [
+              "/user/hand/right/input/trigger",
+              "click"
+            ],
+            [
+              "/user/hand/right/input/a",
+              "click"
+            ]
+          ]
+        },
+        {
+          "output": "/actions/hold_b/in/copy",
+          "inputs": [
+            [
+              "/user/hand/left/input/trigger",
+              "click"
+            ],
+            [
+              "/user/hand/left/input/b",
+              "click"
+            ]
+          ]
+        },
+        {
+          "output": "/actions/hold_b/in/select_all",
+          "inputs": [
+            [
+              "/user/hand/left/input/trigger",
+              "click"
+            ],
+            [
+              "/user/hand/left/input/a",
+              "click"
+            ]
+          ]
+        }
+      ],
       "sources": [
         {
           "path": "/user/hand/right/input/b",
           "mode": "button",
           "inputs": {
-            "held": {
-              "output": "/actions/simple/in/talk"
-            }
-          }
-        },
-        {
-          "path": "/user/hand/right/input/a",
-          "mode": "button",
-          "inputs": {
-            "held": {
-              "output": "/actions/simple/in/paste"
+            "click": {
+              "output": "/actions/hold_b/in/talk"
             }
           }
         }

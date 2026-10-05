@@ -1,7 +1,7 @@
 """fuelCell Voice Typing for the Steam Frame.
 
-Click into any text box, tap the mic (or hold the controller button bound to
-F13), speak, and your words are typed into that box.
+Click into any text box, hold A + B on the controller (or tap the mic), speak,
+let go, and your words are typed into that box.
 """
 
 import argparse
@@ -9,8 +9,10 @@ import os
 import shutil
 import sys
 import threading
+import time
 
 from . import config as config_mod
+from .log import log
 from .keyboard import SHORTCUTS, Typist
 from .linux_input import KeyWatcher, key_code
 from .voice import Recorder, Transcriber
@@ -23,13 +25,23 @@ class Engine:
 
     on_state(state, message) and on_transcript(text) are called from
     background threads.
+
+    before_input() runs right before any keys are sent. It makes sure the
+    keys go to the user's text box and not to our own window, and returns
+    False if it couldn't.
     """
 
+    # Keep recording this long after the button is released, so the last
+    # word isn't cut off.
+    RELEASE_TAIL = 0.3
+
     def __init__(self, cfg, on_state=lambda s, m: None, on_transcript=lambda t: None,
-                 typist_factory=Typist, recorder=None, transcriber_factory=Transcriber):
+                 typist_factory=Typist, recorder=None, transcriber_factory=Transcriber,
+                 before_input=lambda: True):
         self.cfg = cfg
         self.on_state = on_state
         self.on_transcript = on_transcript
+        self.before_input = before_input
         self.typist_factory = typist_factory
         self.transcriber_factory = transcriber_factory
         self.recorder = recorder or Recorder()
@@ -42,6 +54,8 @@ class Engine:
 
     def _set(self, state, message=""):
         self.state = state
+        if state == ERROR:
+            log.error(message)
         self.on_state(state, message)
 
     # -- start-up ---------------------------------------------------------
@@ -61,6 +75,7 @@ class Engine:
         except Exception as err:  # model download/load can fail many ways
             self._set(ERROR, f"Couldn't load the speech model: {err}")
             return
+        log.info("ready (model %s)", self.cfg["model"])
         self._set(READY, "Ready")
 
     def reload_model(self, model):
@@ -98,13 +113,18 @@ class Engine:
                 return
             self._set(LISTENING, "Listening...")
 
-    def stop_talking(self):
+    def stop_talking(self, tail=None):
         with self._lock:
             if self.state != LISTENING:
                 return
-            path = self.recorder.stop()
             self._set(WORKING, "Typing...")
-        threading.Thread(target=self._finish, args=(path,), daemon=True).start()
+        threading.Thread(target=self._stop_and_finish,
+                         args=(self.RELEASE_TAIL if tail is None else tail,), daemon=True).start()
+
+    def _stop_and_finish(self, tail):
+        if tail:
+            time.sleep(tail)
+        self._finish(self.recorder.stop())
 
     def cancel_talking(self):
         with self._lock:
@@ -130,28 +150,39 @@ class Engine:
         if not text:
             self._set(READY, "Didn't catch that. Try again.")
             return
+        log.info("heard %d characters", len(text))
         self.last_text = text
-        self.on_transcript(text)
-        self._type(text)
-        self._set(READY, "Ready")
+        self.on_transcript(text)  # the window also puts it on the clipboard
+        if self.cfg.get("after_talking", "type") == "clipboard":
+            self._set(READY, "Copied. Paste it where you want it.")
+        elif self._type(text):
+            self._set(READY, "Ready")
+        else:
+            self._set(READY, "Copied. Click a text box, then paste.")
 
     def _type(self, text):
+        """Type text into the focused box. Returns False if it couldn't."""
+        if not self.before_input():
+            log.warning("not typing: couldn't move focus away from our window")
+            return False
         if self.cfg.get("add_space", True):
             text += " "
         self.typist.type_text(text)
         if self.cfg.get("press_enter"):
             self.typist.shortcut("enter")
+        return True
 
     def retype_last(self):
         if self.last_text and self.typist and self.state == READY:
-            self._type(self.last_text)
+            threading.Thread(target=self._type, args=(self.last_text,), daemon=True).start()
 
     # -- buttons ----------------------------------------------------------
     def shortcut(self, name):
-        if self.typist:
+        if self.typist and self.before_input():
             self.typist.shortcut(name)
 
     def hotkey(self, action, pressed):
+        log.info("shortcut %s %s", action, "down" if pressed else "up")
         if action == "talk":
             # Hold to talk: press starts, release types.
             (self.start_talking if pressed else self.stop_talking)()
@@ -198,7 +229,22 @@ def check():
              "Install and run SteamVR to use controller shortcuts.")
     except Exception as err:
         line(False, "SteamVR library loaded", f"Run install.sh again ({err}).")
+    from .log import LOG_PATH, tail
+    from .vr import DIAG_PATH
+    try:
+        import json as _json
+        diag = _json.loads(DIAG_PATH.read_text())
+        print(f"\nController shortcuts (last seen {diag['time']}):\n  {diag['summary']}")
+        print(f"  layout: {diag['preset']}, source: {diag['source']}, "
+              f"working: {', '.join(diag['bound']) or 'none'}")
+    except (OSError, ValueError, KeyError):
+        print("\nController shortcuts: no SteamVR session seen yet (open the app while SteamVR runs).")
     print("\nAll good!" if ok else "\nSome things need fixing (see above).")
+    lines = tail(15)
+    if lines:
+        print(f"\nRecent log ({LOG_PATH}):")
+        for entry in lines:
+            print("  " + entry)
     return 0 if ok else 1
 
 
@@ -213,6 +259,8 @@ def main(argv=None):
                         help="register with SteamVR (done automatically) and exit")
     args = parser.parse_args(argv)
 
+    from .log import setup as setup_log
+    setup_log()
     if args.check:
         sys.exit(check())
     if args.register:

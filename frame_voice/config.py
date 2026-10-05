@@ -13,12 +13,17 @@ MODELS = {
     "small.en": "Most accurate",
 }
 
+PRESET_KEYS = ("ab", "trigger", "hold_b")
+
 DEFAULTS = {
     "model": "base.en",
     "add_space": True,
     "press_enter": False,
     "show_intro": True,
-    "controller_preset": "grip",
+    "controller_preset": "ab",
+    # "type": type the words into the focused text box (they also go on the
+    # clipboard). "clipboard": only put them on the clipboard.
+    "after_talking": "type",
     # Optional fallback: keyboard keys (e.g. sent by Steam Input) as shortcuts.
     "keyboard_hotkeys": False,
     "hotkeys": {
@@ -46,6 +51,11 @@ def load(path=None):
             cfg[key] = value
     if cfg["model"] not in MODELS:
         cfg["model"] = DEFAULTS["model"]
+    # Older versions had a "grip" layout; it was replaced by "Hold A + B".
+    if cfg["controller_preset"] not in PRESET_KEYS:
+        cfg["controller_preset"] = DEFAULTS["controller_preset"]
+    if cfg["after_talking"] not in ("type", "clipboard"):
+        cfg["after_talking"] = DEFAULTS["after_talking"]
     return cfg
 
 
