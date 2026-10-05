@@ -397,3 +397,46 @@ def test_button_reader_against_a_local_vrserver(monkeypatch):
     finally:
         reader.stop()
         server.shutdown()
+
+
+def test_trigger_stays_taken_until_let_go(session):
+    session.frame({"trigger", "a"}, n=2)  # paste
+    assert "trigger" in session.frame({"trigger"})  # A let go first: keep the trigger
+    assert "trigger" not in session.frame(set(), n=2)
+
+
+def test_home_environment_is_not_a_game(session):
+    session.fake.scene_pid = 77
+    session.fake.getApplicationKeyByProcessId = lambda pid: "steam.app.250820"  # SteamVR Home
+    session._next_slow = 0
+    session.frame({"a", "b"}, n=2)
+    assert session.calls == [("talk", True)] and not session.paused
+
+
+def test_read_only_shortcuts_while_steamvr_input_is_unreachable(monkeypatch):
+    calls = []
+    reader = FakeReader()
+    svr = vr.SteamVR(lambda a, p: calls.append((a, p)), reader=reader)
+    reader.connected, reader.pressed = True, {"a", "b"}
+    svr._read_only_wait(0.05)
+    assert calls == [("talk", True)] and svr.status == "readonly" and reader.started
+    reader.connected = False  # stream lost: never leave talk held
+    svr._read_only_wait(0.05)
+    assert calls[-1] == ("talk", False) and svr.status == "waiting"
+
+
+def test_button_reader_never_leaves_buttons_held_after_a_crash(monkeypatch):
+    import time
+
+    from frame_voice import vrws
+
+    reader = vrws.ButtonReader()
+
+    def boom():
+        reader.connected, reader._pressed = True, frozenset({"a", "b"})
+        raise TypeError("unexpected reply")
+
+    monkeypatch.setattr(reader, "_session", boom)
+    monkeypatch.setattr(vrws.time, "sleep", lambda s: setattr(reader, "_stop", True))
+    reader._run()
+    assert reader.connected is False and reader.buttons() == set()

@@ -161,10 +161,17 @@ class Engine:
         else:
             self._set(READY, "Copied. If it didn't appear, click the text box and paste.")
 
+    def _focus_ok(self):
+        try:
+            return self.before_input()
+        except Exception:
+            log.exception("moving focus off our window failed")
+            return False
+
     def _type(self, text):
         """Type text into the focused box. Returns False if our own window
         may have had the keyboard (then the words are only on the clipboard)."""
-        focused = self.before_input()
+        focused = self._focus_ok()
         if not focused:
             log.warning("our window may have keyboard focus; typing anyway")
         if self.cfg.get("add_space", True):
@@ -181,7 +188,7 @@ class Engine:
     # -- buttons ----------------------------------------------------------
     def shortcut(self, name):
         if self.typist:
-            self.before_input()
+            self._focus_ok()
             self.typist.shortcut(name)
 
     def hotkey(self, action, pressed):
@@ -190,7 +197,8 @@ class Engine:
             # Hold to talk: press starts, release types.
             (self.start_talking if pressed else self.stop_talking)()
         elif pressed and action in SHORTCUTS:
-            self.shortcut(action)
+            # off the caller's thread: the controller loop must keep running
+            threading.Thread(target=self.shortcut, args=(action,), daemon=True).start()
 
 
 def app_version():

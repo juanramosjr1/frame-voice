@@ -1,15 +1,13 @@
 """The window: fuelCell intro, big mic button, edit keys and settings."""
 
-import contextlib
-import io
 import math
 import os
 import sys
 import threading
 import time
 
-from PySide6.QtCore import (QEasingCurve, QEvent, QObject, QPointF, QRectF, QSize, Qt,
-                            QTimer, QVariantAnimation, Signal)
+from PySide6.QtCore import (QEasingCurve, QEvent, QObject, QPointF, QProcess, QRectF, QSize,
+                            Qt, QTimer, QVariantAnimation, Signal)
 from PySide6.QtGui import (QColor, QFont, QFontMetricsF, QGuiApplication, QIcon,
                            QLinearGradient, QPainter, QPainterPath, QPen, QPixmap,
                            QRadialGradient)
@@ -457,6 +455,7 @@ class Settings(QDialog):
         self.cfg = cfg
         self.engine = engine
         self.vr = vr
+        self._proc = None  # the system check, while it runs
         self.setWindowTitle("Settings")
         self.setMinimumWidth(860)
         lay = QVBoxLayout(self)
@@ -653,7 +652,7 @@ class Settings(QDialog):
         snap = self.vr.snapshot() if self.vr else {}
         self.vr_line.setText(snap.get("summary", "SteamVR isn't connected."))
         self.turn_on.setVisible(snap.get("status") in ("setting", "partial"))
-        lit = snap.get("held", set()) | {f"btn:{b}" for b in snap.get("buttons", ())}
+        lit = set(snap.get("held", ())) | {f"btn:{b}" for b in snap.get("buttons", ())}
         bound = snap.get("bound", {})
         usable = {f"btn:{b}" for b, on in bound.items() if on}
         if snap.get("read_only"):
@@ -676,13 +675,30 @@ class Settings(QDialog):
                 "then pick fuelCell Voice Typing.")
 
     def _check(self):
-        from .app import check
-
-        buf = io.StringIO()
-        with contextlib.redirect_stdout(buf):
-            check()
-        self.output.setPlainText(buf.getvalue())
+        # A separate process: the check talks to SteamVR on its own, which
+        # mustn't disturb this app's connection.
+        if self._proc is not None:
+            return
+        self.output.setPlainText("Checking...")
         self.output.show()
+        self._proc = QProcess(self)
+        self._proc.setProcessChannelMode(QProcess.MergedChannels)
+        self._proc.finished.connect(self._check_done)
+        self._proc.start(sys.executable, ["-m", "frame_voice", "--check"])
+
+    def _check_done(self, *_):
+        proc, self._proc = self._proc, None
+        if proc is not None:
+            text = bytes(proc.readAll()).decode(errors="replace")
+            self.output.setPlainText(text or "The check didn't run.")
+
+    def done(self, result):
+        if self._proc is not None:  # closed while the check runs
+            self._proc.finished.disconnect(self._check_done)
+            self._proc.kill()
+            self._proc.waitForFinished(1000)
+            self._proc = None
+        super().done(result)
 
 
 # -- main window ----------------------------------------------------------------
@@ -855,15 +871,15 @@ class MainWindow(QWidget):
 
     def on_vr_status(self, _text=""):
         status = self.vr.status
-        color = {"on": ACCENT, "partial": ACCENT, "setting": AMBER, "nobind": AMBER,
-                 "error": RED}.get(status, MUTED)
+        color = {"on": ACCENT, "partial": ACCENT, "readonly": ACCENT, "setting": AMBER,
+                 "nobind": AMBER, "error": RED}.get(status, MUTED)
         self.vr_dot.setStyleSheet(f"background: {color}; border-radius: 5px;")
         self.turn_on.setVisible(status in ("setting", "partial"))
         self.turn_on.setText("Turn on")
         self.update_controller_hint()
 
     def update_controller_hint(self):
-        if self.vr.status == "on":
+        if self.vr.status in ("on", "readonly"):
             self.controller.setText(preset_hint(self.cfg["controller_preset"],
                                                 self.cfg["edit_shortcuts"]))
         elif self.vr.status == "setting":
@@ -877,7 +893,7 @@ class MainWindow(QWidget):
             self.hint.setText(self.ready_hint())
 
     def ready_hint(self):
-        if self.vr.status not in ("on", "partial"):
+        if self.vr.status not in ("on", "partial", "readonly"):
             return "Click a text box first, then tap the mic."
         label = PRESETS[self.cfg["controller_preset"]][0]
         combo = label[5:] if label.startswith("Hold ") else label

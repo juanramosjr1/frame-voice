@@ -202,12 +202,33 @@ def test_no_permission_gives_friendly_error(tmp_path):
     assert eng.state == ERROR and "installer" in states[-1][1]
 
 
+def wait_for(cond, timeout=2):
+    deadline = time.monotonic() + timeout
+    while not cond() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    return cond()
+
+
 def test_copy_paste_hotkeys(tmp_path):
     eng, dev, _ = make_engine(tmp_path)
-    eng.hotkey("copy", True)
+    eng.hotkey("copy", True)  # runs off the caller's (controller) thread
     eng.hotkey("copy", False)
+    assert wait_for(lambda: len(typed(dev)) == 2)
     eng.hotkey("paste", True)
+    assert wait_for(lambda: len(typed(dev)) == 4)
     assert typed(dev) == ["LEFTCTRL", "C", "LEFTCTRL", "V"]
+
+
+def test_focus_guard_crash_does_not_stick_the_app(tmp_path):
+    eng, dev, states = make_engine(tmp_path, "hi", add_space=False)
+
+    def broken():
+        raise RuntimeError("no display")
+
+    eng.before_input = broken
+    eng.state = "working"
+    eng._finish(eng.recorder.stop())
+    assert eng.state == READY and typed(dev) == ["H", "I"]
 
 
 def test_load_wav_resamples_and_mixes_to_mono(tmp_path):
@@ -309,3 +330,13 @@ def test_kwin_rule_skipped_without_kde_tools(monkeypatch):
     conf = focus.KConfig()
     conf.tools = None
     assert focus.install_kwin_rule(conf) is False
+
+
+def test_failed_kreadconfig_never_wipes_rules(monkeypatch):
+    import subprocess
+
+    from frame_voice import focus
+
+    conf = focus.KConfig()
+    conf.tools = ("/bin/false", "/bin/false")
+    assert focus.install_kwin_rule(conf) is False  # read failed: nothing written

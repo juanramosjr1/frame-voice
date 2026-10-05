@@ -199,7 +199,10 @@ class KConfig:
                 break
 
     def _run(self, args):
-        return subprocess.run(args, capture_output=True, text=True, timeout=5).stdout.strip()
+        out = subprocess.run(args, capture_output=True, text=True, timeout=5)
+        if out.returncode != 0:  # never mistake a failed read for "no rules"
+            raise subprocess.SubprocessError(f"{os.path.basename(args[0])}: {out.stderr.strip()[:200]}")
+        return out.stdout.strip()
 
     def get(self, group, key):
         return self._run([self.tools[1], "--file", self.FILE, "--group", group, "--key", key])

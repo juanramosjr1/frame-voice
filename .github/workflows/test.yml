@@ -49,7 +49,7 @@ jobs:
           $VENV/bin/python -m pytest -rA --tb=short -p no:cacheprovider tests 2>&1 | tee pytest.log
           status=${PIPESTATUS[0]}
           # Surface results as annotations so they're readable without the raw log.
-          grep -E "^(FAILED|ERROR) " pytest.log | head -10 | sed 's/^/::error title=test::/'
+          grep -E "^(FAILED|ERROR) tests/" pytest.log | head -10 | sed 's/^/::error title=test::/'
           grep -E "^E +" pytest.log | head -10 | sed 's/^/::warning title=detail::/'
           grep -E "heard:|passed|failed" pytest.log | tail -3 | sed 's/^/::notice title=result::/'
           exit $status

@@ -87,6 +87,14 @@ def combo_actions(preset, edits, held):
     return set()
 
 
+# Scene apps that are a home environment, not a game.
+HOME_KEYS = ("steam.app.250820",)  # SteamVR Home
+
+
+def is_home(app_key):
+    return app_key in HOME_KEYS or app_key.startswith(("system.", "openvr.tool.", "openvr.component."))
+
+
 def legacy_buttons(bits):
     return {name for name, bit in LEGACY_BITS.items() if bits >> bit & 1}
 
@@ -158,6 +166,7 @@ class SteamVR:
         self.summary = "Connecting to SteamVR..."
         self._legacy_seen = False
         self._scene_pid = 0
+        self._scene_key = ""
         self._connected_at = 0.0
         self._next_slow = 0.0
         self._last_diag = None
@@ -241,8 +250,7 @@ class SteamVR:
                     log.info("steamvr init failed: %s", err)
                     waiting_logged = True
                 self.connected = False
-                self._set_status("waiting", "Waiting for SteamVR. Shortcuts start when SteamVR runs.")
-                time.sleep(5)
+                self._read_only_wait(5.0)
                 continue
             waiting_logged = False
             try:
@@ -260,6 +268,38 @@ class SteamVR:
                 except Exception:
                     pass
             time.sleep(3)
+
+    def _start_reader(self):
+        if self.reader is None:
+            from .vrws import ButtonReader
+            self.reader = ButtonReader()
+        if self.reader:
+            self.reader.start()
+
+    def _read_only_wait(self, seconds):
+        """While we can't connect to SteamVR (it isn't running, or this
+        session can't reach it), the read-only source can still run the
+        shortcuts. It works from any session, since it's a local web socket."""
+        self._start_reader()
+        end = time.monotonic() + seconds
+        while not self._stop and time.monotonic() < end:
+            read_only = bool(self.reader and self.reader.connected)
+            self._emit(self.reader.buttons() if read_only else set())
+            if read_only:
+                self._set_status("readonly", "Shortcuts work through SteamVR's controller "
+                                             "stream, but the buttons also reach other apps.")
+            else:
+                self._set_status("waiting", "Waiting for SteamVR. Shortcuts start when SteamVR runs.")
+            time.sleep(1 / 60)
+
+    def _emit(self, buttons):
+        """Report combo changes for the buttons held now."""
+        held = combo_actions(self.preset, self.edits, buttons)
+        for action in held - self.held:
+            self.on_action(action, True)
+        for action in self.held - held:
+            self.on_action(action, False)
+        self.buttons, self.held = buttons, held
 
     def _release_all(self):
         for action in self.held:
@@ -281,7 +321,7 @@ class SteamVR:
     def open(self, openvr):
         """Connect to SteamVR Input. Separate from step() so tests can drive it."""
         self.vr = openvr
-        self.reset()
+        self._release_all()
         self._register(openvr)
         vrinput = openvr.VRInput()
         vrinput.setActionManifestPath(str(HERE / "actions.json"))
@@ -289,11 +329,7 @@ class SteamVR:
         self.actions = {b: vrinput.getActionHandle(f"/actions/{b}/in/press") for b in BUTTONS}
         self.global_priority = openvr.k_nActionSetOverlayGlobalPriorityMin + 0x100
         self.event = openvr.VREvent_t()
-        if self.reader is None:
-            from .vrws import ButtonReader
-            self.reader = ButtonReader()
-        if self.reader:
-            self.reader.start()
+        self._start_reader()
         self.badge = Badge(openvr)
         self.connected = True
         self._connected_at = time.monotonic()
@@ -356,7 +392,8 @@ class SteamVR:
             except Exception:
                 key = "?"
             log.info("steamvr: scene app is now %s", f"{key} (pid {pid})" if pid else "none")
-        self.in_game = bool(pid) and pid != os.getpid()
+            self._scene_key = key
+        self.in_game = bool(pid) and pid != os.getpid() and not is_home(self._scene_key)
         try:
             dashboard = bool(openvr.VROverlay().isDashboardVisible())
         except Exception:
@@ -409,8 +446,11 @@ class SteamVR:
         self.paused = self.in_game and not self.dashboard and not self.in_games
         read_only = bool(self.reader and self.reader.connected)
         take = buttons_to_take(preset, edits)
-        if not (self.paused or read_only) and self.buttons & trigger_partners(preset, edits):
-            take.add("trigger")  # the read-only source would tell us without taking it
+        if not (self.paused or read_only) and (
+                self.buttons & trigger_partners(preset, edits)
+                # keep it until it's let go, or the laser would get half a click
+                or ("trigger" in self.taken and "trigger" in self.buttons)):
+            take.add("trigger")  # (the read-only source reports it without taking it)
         global_ok = not (self.paused or self.global_rejected)
         priority = self.global_priority if global_ok else 0
 
@@ -450,12 +490,8 @@ class SteamVR:
         if self.paused:
             buttons = set()
 
-        held = combo_actions(preset, edits, buttons)
-        for action in held - self.held:
-            self.on_action(action, True)
-        for action in self.held - held:
-            self.on_action(action, False)
-        self.taken, self.buttons, self.held = take, buttons, held
+        self._emit(buttons)
+        self.taken = take
 
         self._report(now, read_only)
         if self._badge_dirty and self.badge:

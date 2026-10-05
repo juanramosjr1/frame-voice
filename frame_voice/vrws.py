@@ -198,13 +198,15 @@ class ButtonReader:
         while not self._stop:
             try:
                 self._session()
-            except (OSError, ValueError, KeyError) as err:
+            except Exception as err:  # undocumented protocol: anything can go wrong
                 text = f"{type(err).__name__}: {err}"
                 if text != self._last_error:
                     self._last_error = text
                     log.info("steamvr web socket: %s", text)
-            self.connected = False
-            self._pressed = frozenset()
+            finally:
+                # never leave a button looking held
+                self.connected = False
+                self._pressed = frozenset()
             time.sleep(5)
 
     def _session(self):
