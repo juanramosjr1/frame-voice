@@ -358,3 +358,15 @@ def test_intro_has_no_off_switch(win, tmp_path):
     assert not [t for t in labels if "intro" in t.lower()]  # it always plays
     assert "show_intro" not in config.load(tmp_path / "none.json")
     s.close()
+
+
+def test_intro_plays_on_the_first_open_after_the_headset_starts(tmp_path):
+    boot = tmp_path / "boot_id"
+    boot.write_text("boot-1\n")
+    assert ui.intro_due(boot)       # first open
+    assert not ui.intro_due(boot)   # opened again
+    assert not ui.intro_due(boot)
+    boot.write_text("boot-2\n")     # the headset restarted
+    assert ui.intro_due(boot)
+    assert not ui.intro_due(boot)
+    assert ui.intro_due(tmp_path / "missing")  # can't tell: play it

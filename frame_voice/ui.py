@@ -1018,6 +1018,31 @@ class MainWindow(QWidget):
             self._testing = False
 
 
+BOOT_ID = "/proc/sys/kernel/random/boot_id"
+
+
+def intro_due(boot_id_path=BOOT_ID):
+    """The fuelCell intro plays the first time the app opens after the
+    headset starts, not every time the window opens."""
+    from . import log as log_mod  # looked up each time: tests move it
+    try:
+        boot = open(boot_id_path).read().strip()
+    except OSError:
+        return True
+    marker = log_mod.STATE_DIR / "intro-played"
+    try:
+        if marker.read_text().strip() == boot:
+            return False
+    except OSError:
+        pass
+    try:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(boot)
+    except OSError:
+        pass
+    return True
+
+
 def run(cfg, engine_cls, show_intro=True):
     """The copy of the app with the window. One runs at a time: opening the
     app again shows its window."""
@@ -1046,7 +1071,8 @@ def run(cfg, engine_cls, show_intro=True):
     # On KDE, make sure clicking our window never moves keyboard focus.
     threading.Thread(target=focus.install_kwin_rule, daemon=True).start()
 
-    if show_intro:
+    if show_intro and intro_due():
+        log.info("first open since the headset started: playing the intro")
         intro = Intro()
         intro.finished.connect(win.present)
         intro.start()
