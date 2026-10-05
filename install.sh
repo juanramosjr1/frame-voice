@@ -2,7 +2,7 @@
 # fuelCell Voice Typing installer for the Steam Frame (SteamOS desktop mode).
 #
 # One line, in Konsole:
-#   curl -fsSL https://raw.githubusercontent.com/juanramosjr1/frame-voice/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/juanramosjr1/frame-voice/main/install.sh | bash && exec bash
 set -euo pipefail
 
 REPO="juanramosjr1/frame-voice"
@@ -80,6 +80,10 @@ else
   sudo mkdir -p /etc/udev/rules.d || fail "couldn't add the permission."
   echo 'KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"' \
     | sudo tee /etc/udev/rules.d/80-frame-voice.rules >/dev/null || fail "couldn't add the permission."
+  # SteamOS updates reset /etc except for listed files; keep ours.
+  { sudo mkdir -p /etc/atomic-update.conf.d \
+    && echo /etc/udev/rules.d/80-frame-voice.rules | sudo tee /etc/atomic-update.conf.d/frame-voice.conf >/dev/null; } \
+    2>/dev/null || true
   { sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=uinput; } 2>/dev/null || true
   ok "Allowed (takes effect after a restart if not right away)"
 fi
@@ -106,13 +110,14 @@ cat > "${XDG_DATA_HOME:-$HOME/.local/share}/applications/frame-voice.desktop" <<
 Type=Application
 Name=fuelCell Voice Typing
 Comment=Speak into any text box, plus copy and paste buttons
-Exec=$VENV/bin/frame-voice
+Exec=env -u LD_LIBRARY_PATH -u LD_PRELOAD $VENV/bin/frame-voice
 Icon=frame-voice
 Categories=Utility;Accessibility;
 DESKTOP
+touch "${XDG_DATA_HOME:-$HOME/.local/share}/applications"  # a running Steam rescans its app list
 "$VENV/bin/frame-voice" --register >/dev/null 2>&1 || true
 ok "Added 'fuelCell Voice Typing' to your apps"
 
 printf '\n\033[1;32mAll done!\033[0m Open \033[1mfuelCell Voice Typing\033[0m from your apps.\n'
-printf 'Check everything with:  ~/.local/bin/frame-voice --check\n'
-printf '(In new Konsole windows, just  frame-voice --check  works too.)\n\n'
+printf 'If it says shortcuts need a SteamVR setting, tap \033[1mTurn on\033[0m.\n'
+printf 'Check everything with:  ~/.local/bin/frame-voice --check\n\n'

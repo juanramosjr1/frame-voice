@@ -106,6 +106,9 @@ def test_config_roundtrip_and_bad_values(tmp_path):
     # the old "grip" layout no longer exists
     path.write_text(json.dumps({"controller_preset": "grip"}))
     assert config.load(path)["controller_preset"] == "ab"
+    defaults = config.load(tmp_path / "missing.json")
+    assert defaults["edit_shortcuts"] is True and defaults["in_games"] is False
+    assert defaults["autostart"] is True
 
 
 # -- engine ----------------------------------------------------------------------
@@ -207,31 +210,6 @@ def test_copy_paste_hotkeys(tmp_path):
     assert typed(dev) == ["LEFTCTRL", "C", "LEFTCTRL", "V"]
 
 
-# -- SteamVR files -----------------------------------------------------------------
-SVR = Path(__file__).parent.parent / "frame_voice" / "steamvr"
-
-
-def test_steamvr_bindings_only_use_declared_actions():
-    from frame_voice.vr import ACTIONS, PRESETS
-
-    manifest = json.loads((SVR / "actions.json").read_text())
-    declared = {a["name"].lower() for a in manifest["actions"]}
-    assert {f"/actions/{p}/in/{a}" for p in PRESETS for a in ACTIONS} == declared
-    for entry in manifest["default_bindings"]:
-        b = json.loads((SVR / entry["binding_url"]).read_text())
-        assert b["controller_type"] == entry["controller_type"]
-        for preset, body in b["bindings"].items():
-            outs = [c["output"] for c in body.get("chords", [])]
-            outs += [i["output"] for s in body.get("sources", []) for i in s["inputs"].values()]
-            assert outs and all(o in declared for o in outs), preset
-            assert f"{preset}/in/talk" in outs
-
-
-def test_frame_controller_is_first_default_binding():
-    manifest = json.loads((SVR / "actions.json").read_text())
-    assert manifest["default_bindings"][0]["controller_type"] == "frame_controller"
-
-
 def test_load_wav_resamples_and_mixes_to_mono(tmp_path):
     import wave
 
@@ -272,35 +250,62 @@ def test_clipboard_only_mode_types_nothing(tmp_path):
     assert states[-1] == (READY, "Copied. Paste it where you want it.")
 
 
-def test_never_types_into_our_own_window(tmp_path):
-    eng, dev, states = make_engine(tmp_path, "hello", focus_ok=False)
+def test_when_our_window_may_have_focus_it_still_types_and_says_paste(tmp_path):
+    # Our window swallows typed keys, so typing is harmless if it does have
+    # focus, and lands in the right place if the focus guess was stale.
+    eng, dev, states = make_engine(tmp_path, "hi", focus_ok=False, add_space=False)
     eng._finish(eng.recorder.stop())
+    assert typed(dev) == ["H", "I"]
+    assert eng.transcripts == ["hi"]  # on the clipboard too
+    assert states[-1] == (READY, "Copied. If it didn't appear, click the text box and paste.")
     eng.shortcut("paste")
-    assert dev.events == []
-    assert eng.transcripts == ["hello"]  # still copied, so it can be pasted
-    assert "paste" in states[-1][1]
+    assert typed(dev)[-2:] == ["LEFTCTRL", "V"]
 
 
-def test_basic_button_fallback():
-    from frame_voice.vr import BTN_A, BTN_B, BTN_TRIGGER, legacy_actions
+# -- KWin rule: our window never takes keyboard focus on KDE ---------------------
+class FakeKConfig:
+    def __init__(self, data=None):
+        self.data = data or {}
 
-    a, b, t = 1 << BTN_A, 1 << BTN_B, 1 << BTN_TRIGGER
-    assert legacy_actions("ab", {"right": a | b}) == {"talk"}
-    assert legacy_actions("ab", {"right": b}) == set()
-    assert legacy_actions("trigger", {"right": t | b}) == {"talk"}
-    assert legacy_actions("hold_b", {"right": b}) == {"talk"}
-    assert legacy_actions("hold_b", {"left": t | a}) == {"paste"}
-    assert legacy_actions("ab", {}) == set()
+    def get(self, group, key):
+        return self.data.get(group, {}).get(key, "")
+
+    def put(self, group, key, value):
+        self.data.setdefault(group, {})[key] = value
+
+    def delete(self, group, key):
+        self.data.get(group, {}).pop(key, None)
 
 
-def test_every_preset_has_talk_paste_copy_select_all():
-    from frame_voice.vr import PRESETS
+def test_kwin_rule_added_once_and_keeps_other_rules(monkeypatch):
+    from frame_voice import focus
 
-    for entry in json.loads((SVR / "actions.json").read_text())["default_bindings"]:
-        b = json.loads((SVR / entry["binding_url"]).read_text())["bindings"]
-        for preset in PRESETS:
-            body = b[f"/actions/{preset}"]
-            outs = {c["output"].rsplit("/", 1)[1] for c in body.get("chords", [])}
-            outs |= {i["output"].rsplit("/", 1)[1] for s in body.get("sources", [])
-                     for i in s["inputs"].values()}
-            assert {"talk", "paste", "copy", "select_all"} <= outs, (entry, preset)
+    monkeypatch.setattr(focus, "_dbus", lambda *a: "")
+    conf = FakeKConfig({"General": {"rules": "abc-uuid", "count": "1"}, "abc-uuid": {"x": "1"}})
+    assert focus.install_kwin_rule(conf)
+    assert conf.data["General"] == {"rules": "abc-uuid,frame-voice", "count": "2"}
+    rule = conf.data["frame-voice"]
+    assert rule["acceptfocus"] == "false" and rule["acceptfocusrule"] == "2"
+    assert rule["wmclass"] == "frame-voice" and rule["types"] == "1"
+    assert focus.install_kwin_rule(conf)  # second time: no duplicate
+    assert conf.data["General"]["rules"] == "abc-uuid,frame-voice"
+    assert focus.remove_kwin_rule(conf)
+    assert conf.data["General"] == {"rules": "abc-uuid", "count": "1"}
+    assert conf.data["frame-voice"] == {} and conf.data["abc-uuid"] == {"x": "1"}
+
+
+def test_kwin_rule_with_old_numbered_rules(monkeypatch):
+    from frame_voice import focus
+
+    monkeypatch.setattr(focus, "_dbus", lambda *a: "")
+    conf = FakeKConfig({"General": {"count": "2"}})
+    focus.install_kwin_rule(conf)
+    assert conf.data["General"] == {"rules": "1,2,frame-voice", "count": "3"}
+
+
+def test_kwin_rule_skipped_without_kde_tools(monkeypatch):
+    from frame_voice import focus
+
+    conf = focus.KConfig()
+    conf.tools = None
+    assert focus.install_kwin_rule(conf) is False

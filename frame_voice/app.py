@@ -26,9 +26,10 @@ class Engine:
     on_state(state, message) and on_transcript(text) are called from
     background threads.
 
-    before_input() runs right before any keys are sent. It makes sure the
-    keys go to the user's text box and not to our own window, and returns
-    False if it couldn't.
+    before_input() runs right before any keys are sent. It moves keyboard
+    focus off our own window if it has it, and returns False if it couldn't.
+    Keys are sent anyway (our window ignores typed keys, so nothing breaks),
+    and every dictation is on the clipboard to paste by hand if needed.
     """
 
     # Keep recording this long after the button is released, so the last
@@ -158,19 +159,20 @@ class Engine:
         elif self._type(text):
             self._set(READY, "Ready")
         else:
-            self._set(READY, "Copied. Click a text box, then paste.")
+            self._set(READY, "Copied. If it didn't appear, click the text box and paste.")
 
     def _type(self, text):
-        """Type text into the focused box. Returns False if it couldn't."""
-        if not self.before_input():
-            log.warning("not typing: couldn't move focus away from our window")
-            return False
+        """Type text into the focused box. Returns False if our own window
+        may have had the keyboard (then the words are only on the clipboard)."""
+        focused = self.before_input()
+        if not focused:
+            log.warning("our window may have keyboard focus; typing anyway")
         if self.cfg.get("add_space", True):
             text += " "
         self.typist.type_text(text)
         if self.cfg.get("press_enter"):
             self.typist.shortcut("enter")
-        return True
+        return focused
 
     def retype_last(self):
         if self.last_text and self.typist and self.state == READY:
@@ -178,7 +180,8 @@ class Engine:
 
     # -- buttons ----------------------------------------------------------
     def shortcut(self, name):
-        if self.typist and self.before_input():
+        if self.typist:
+            self.before_input()
             self.typist.shortcut(name)
 
     def hotkey(self, action, pressed):
@@ -190,8 +193,62 @@ class Engine:
             self.shortcut(action)
 
 
+def session_info():
+    """Which display session we're in. On the Frame, apps either run in the
+    Steam (VR) session or inside the KDE desktop shown in VR, and typing and
+    focus work differently in each."""
+    env = {k: os.environ.get(k, "") for k in (
+        "DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "XDG_CURRENT_DESKTOP",
+        "XDG_SESSION_TYPE", "DBUS_SESSION_BUS_ADDRESS", "QT_QPA_PLATFORM")}
+    if "KDE" in env["XDG_CURRENT_DESKTOP"].upper() or env["XDG_RUNTIME_DIR"].endswith("nested_plasma"):
+        env["session"] = "KDE desktop"
+    elif env["DISPLAY"] or env["WAYLAND_DISPLAY"]:
+        env["session"] = "Steam / SteamVR"
+    else:
+        env["session"] = "no display"
+    return env
+
+
+def _steamvr_now():
+    """Ask a running SteamVR for what the shortcuts depend on. Never starts SteamVR."""
+    import openvr
+
+    from .vr import GLOBAL_SETTING, GLOBAL_SETTING_NAME
+
+    openvr.init(openvr.VRApplication_Background)
+    try:
+        out = []
+        try:
+            on = openvr.VRSettings().getBool(*GLOBAL_SETTING)
+        except Exception:
+            on = False
+        out.append((bool(on), f"SteamVR '{GLOBAL_SETTING_NAME}' is {'on' if on else 'off'}",
+                    "Open the app and tap Turn on, or turn it on in SteamVR Settings > "
+                    "Developer (show Advanced Settings first)."))
+        system = openvr.VRSystem()
+        kinds = []
+        for i in range(openvr.k_unMaxTrackedDeviceCount):
+            try:
+                if system.getTrackedDeviceClass(i) == openvr.TrackedDeviceClass_Controller:
+                    kinds.append(system.getStringTrackedDeviceProperty(i, openvr.Prop_ControllerType_String))
+            except Exception:
+                pass
+        out.append((bool(kinds), f"Controllers: {', '.join(kinds) or 'none'}",
+                    "Turn on your controllers."))
+        pid = openvr.VRApplications().getCurrentSceneProcessId()
+        out.append((True, "A VR game is running" if pid else "No VR game running", ""))
+        return out
+    finally:
+        openvr.shutdown()
+
+
 def check():
     """Print a quick health check of everything the app needs."""
+    import json
+
+    from .log import LOG_PATH, tail
+    from .vr import DIAG_PATH
+
     ok = True
 
     def line(good, text, fix=""):
@@ -208,7 +265,8 @@ def check():
                     and os.access(f"/dev/input/{p}", os.R_OK)] if os.path.isdir("/dev/input") else []
         line(bool(readable), f"Can read keyboard hotkeys ({len(readable)} input devices)",
              "Add yourself to the 'input' group: sudo usermod -aG input $USER")
-    line(bool(shutil.which("pw-record") or shutil.which("arecord")), "Microphone recorder found",
+    recorder = shutil.which("pw-record") or shutil.which("arecord")
+    line(bool(recorder), f"Microphone recorder: {os.path.basename(recorder or 'missing')}",
          "SteamOS should include pw-record; check that PipeWire is installed.")
     try:
         from faster_whisper.utils import download_model
@@ -229,16 +287,27 @@ def check():
              "Install and run SteamVR to use controller shortcuts.")
     except Exception as err:
         line(False, "SteamVR library loaded", f"Run install.sh again ({err}).")
-    from .log import LOG_PATH, tail
-    from .vr import DIAG_PATH
+    else:
+        try:
+            if not openvr.isRuntimeInstalled():
+                raise RuntimeError("SteamVR isn't installed")
+            for good, text, fix in _steamvr_now():
+                line(good, text, fix)
+        except Exception:
+            print("  --    SteamVR isn't running right now (shortcuts need it).")
+
     try:
-        import json as _json
-        diag = _json.loads(DIAG_PATH.read_text())
-        print(f"\nController shortcuts (last seen {diag['time']}):\n  {diag['summary']}")
+        diag = json.loads(DIAG_PATH.read_text())
+        print(f"\nController shortcuts (last seen by the app at {diag['time']}):\n  {diag['summary']}")
         print(f"  layout: {diag['preset']}, source: {diag['source']}, "
-              f"working: {', '.join(diag['bound']) or 'none'}")
+              f"buttons bound: {', '.join(diag['bound']) or 'none'}")
     except (OSError, ValueError, KeyError):
         print("\nController shortcuts: no SteamVR session seen yet (open the app while SteamVR runs).")
+    info = session_info()
+    print(f"\nSession: {info.pop('session')}")
+    for key, value in info.items():
+        print(f"  {key}={value}")
+    print(f"  python {sys.version.split()[0]}")
     print("\nAll good!" if ok else "\nSome things need fixing (see above).")
     lines = tail(15)
     if lines:
@@ -248,6 +317,21 @@ def check():
     return 0 if ok else 1
 
 
+def clean_steam_env(argv):
+    """Apps started by Steam or SteamVR inherit Steam's runtime libraries
+    (LD_LIBRARY_PATH / LD_PRELOAD), which can break the window toolkit.
+    Restart once without them."""
+    dirty = [k for k in ("LD_LIBRARY_PATH", "LD_PRELOAD") if "steam" in os.environ.get(k, "").lower()]
+    if not dirty or os.environ.get("FRAME_VOICE_CLEAN_ENV"):
+        return
+    env = {k: v for k, v in os.environ.items() if k not in dirty}
+    env["FRAME_VOICE_CLEAN_ENV"] = "1"
+    try:
+        os.execve(sys.executable, [sys.executable, "-m", "frame_voice", *argv], env)
+    except OSError:
+        pass
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="frame-voice", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -255,8 +339,12 @@ def main(argv=None):
     parser.add_argument("--no-intro", action="store_true", help="skip the fuelCell intro")
     parser.add_argument("--no-window", action="store_true",
                         help="background only: controller shortcuts, no window")
+    parser.add_argument("--background", action="store_true",
+                        help="start with the window hidden (opening the app shows it)")
     parser.add_argument("--register", action="store_true",
                         help="register with SteamVR (done automatically) and exit")
+    parser.add_argument("--remove-kwin-rule", action="store_true", help=argparse.SUPPRESS)
+    argv = sys.argv[1:] if argv is None else argv
     args = parser.parse_args(argv)
 
     from .log import setup as setup_log
@@ -267,13 +355,23 @@ def main(argv=None):
         from .vr import write_vrmanifest
         print(write_vrmanifest())
         return
+    if args.remove_kwin_rule:
+        from .focus import remove_kwin_rule
+        remove_kwin_rule()
+        return
 
+    clean_steam_env(argv)
+    info = session_info()
+    log.info("starting %s; session: %s", " ".join(argv) or "(no options)",
+             ", ".join(f"{k}={v}" for k, v in info.items() if v))
     cfg = config_mod.load()
     if args.no_window:
         from .vr import SteamVR
 
         engine = Engine(cfg)
-        vr = SteamVR(engine.hotkey, cfg["controller_preset"], on_status=print)
+        vr = SteamVR(engine.hotkey, cfg["controller_preset"], on_status=print,
+                     edits=cfg["edit_shortcuts"], in_games=cfg["in_games"],
+                     autolaunch=cfg["autostart"])
         engine.on_state = lambda s, m: (print(m), vr.show_state(s, m))
         engine.load()
         if cfg.get("keyboard_hotkeys"):
@@ -283,7 +381,8 @@ def main(argv=None):
         return
 
     from .ui import run
-    sys.exit(run(cfg, Engine, show_intro=cfg["show_intro"] and not args.no_intro))
+    sys.exit(run(cfg, Engine, show_intro=cfg["show_intro"] and not args.no_intro,
+                 background=args.background))
 
 
 if __name__ == "__main__":

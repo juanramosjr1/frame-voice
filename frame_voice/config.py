@@ -21,6 +21,12 @@ DEFAULTS = {
     "press_enter": False,
     "show_intro": True,
     "controller_preset": "ab",
+    # Trigger + A / Y / X for paste / copy / select all.
+    "edit_shortcuts": True,
+    # Keep the shortcuts on while a VR game runs (the game then loses those buttons).
+    "in_games": False,
+    # Let SteamVR start the app (in the background) when the headset starts.
+    "autostart": True,
     # "type": type the words into the focused text box (they also go on the
     # clipboard). "clipboard": only put them on the clipboard.
     "after_talking": "type",
@@ -65,16 +71,8 @@ def save(cfg, path=None):
     path.write_text(json.dumps(cfg, indent=2))
 
 
-def autostart_enabled():
-    return AUTOSTART_FILE.exists()
-
-
-def set_autostart(enabled, exec_line):
-    if enabled:
-        AUTOSTART_FILE.parent.mkdir(parents=True, exist_ok=True)
-        AUTOSTART_FILE.write_text(
-            "[Desktop Entry]\nType=Application\nName=Voice Typing\n"
-            f"Exec={exec_line}\nIcon=frame-voice\nX-GNOME-Autostart-enabled=true\n"
-        )
-    elif AUTOSTART_FILE.exists():
+def remove_desktop_autostart():
+    """Older versions could start the app with the desktop session; SteamVR
+    starts it now. Turning auto-start off removes that file too."""
+    if AUTOSTART_FILE.exists():
         AUTOSTART_FILE.unlink()

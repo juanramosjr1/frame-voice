@@ -1,94 +1,81 @@
 """Regenerate frame_voice/steamvr/*.json (SteamVR action manifest + default
 bindings). Run: python3 tools/gen_bindings.py
+
+Each button the app uses is its own action set with one "press" action, bound
+as a plain button. Combos (hold A + B, trigger + A, ...) are worked out in
+frame_voice/vr.py, so SteamVR chords aren't needed. One set per button lets the
+app take only the buttons it needs at that moment (see vr.py).
 """
 
 import json
 from pathlib import Path
 
 OUT = Path(__file__).resolve().parent.parent / "frame_voice" / "steamvr"
+APP_KEY = "fuelcell.voicetyping"
 
-ACTIONS = ["talk", "copy", "paste", "select_all", "enter"]
-LABELS = {"talk": "Hold to talk", "copy": "Copy", "paste": "Paste",
-          "select_all": "Select all", "enter": "Enter"}
-PRESETS = {"ab": "Hold A + B", "trigger": "Trigger + B", "hold_b": "Hold B"}
+BUTTONS = {
+    "a": ("Button A", "A: talk (with B), paste (with the trigger)"),
+    "b": ("Button B", "B: talk"),
+    "x": ("Button X", "X: select all (with the trigger)"),
+    "y": ("Button Y", "Y: copy (with the trigger)"),
+    "trigger": ("Trigger", "Trigger: used together with A, B, X and Y"),
+}
 
-# Physical buttons per controller type: name -> (hand, input path component).
-# Steam Frame: A/B/X/Y and the trigger, as on a gamepad.
+# Where each button is, per controller type: name -> (hand, input).
 CONTROLLERS = {
-    "frame_controller": {
-        "A": ("right", "a"), "B": ("right", "b"), "X": ("left", "x"), "Y": ("left", "y"),
-    },
+    # Steam Frame: A, B, X and Y are all on the right controller (Valve's
+    # "Steam Frame Input" docs). The left one has a d-pad instead.
+    "frame_controller": {"a": ("right", "a"), "b": ("right", "b"), "x": ("right", "x"),
+                         "y": ("right", "y"), "trigger": ("right", "trigger")},
     # Quest / Touch: A/B on the right, X/Y on the left.
-    "oculus_touch": {
-        "A": ("right", "a"), "B": ("right", "b"), "X": ("left", "x"), "Y": ("left", "y"),
-    },
-    # Index: A/B on both hands; use the left hand's for the X/Y roles.
-    "knuckles": {
-        "A": ("right", "a"), "B": ("right", "b"), "X": ("left", "a"), "Y": ("left", "b"),
-    },
+    "oculus_touch": {"a": ("right", "a"), "b": ("right", "b"), "x": ("left", "x"),
+                     "y": ("left", "y"), "trigger": ("right", "trigger")},
+    # Index: A/B on both hands; the left hand's stand in for X/Y.
+    "knuckles": {"a": ("right", "a"), "b": ("right", "b"), "x": ("left", "a"),
+                 "y": ("left", "b"), "trigger": ("right", "trigger")},
 }
 
 
-def path(hand, comp):
-    return f"/user/hand/{hand}/input/{comp}"
-
-
-def chord(preset, action, *inputs):
-    return {"output": f"/actions/{preset}/in/{action}",
-            "inputs": [[path(h, c), "click"] for h, c in inputs]}
-
-
-def button(preset, action, hand, comp):
-    return {"path": path(hand, comp), "mode": "button",
-            "inputs": {"click": {"output": f"/actions/{preset}/in/{action}"}}}
-
-
-def bindings(ctype, face):
-    def trig(btn):
-        hand, comp = face[btn]
-        return ((hand, "trigger"), (hand, comp))
-
+def bindings(ctype, where):
     out = {}
-    for preset in PRESETS:
-        chords = [
-            chord(preset, "paste", *trig("A")),
-            chord(preset, "copy", *trig("Y")),
-            chord(preset, "select_all", *trig("X")),
-        ]
-        sources = []
-        if preset == "ab":
-            chords.append(chord(preset, "talk", face["A"], face["B"]))
-        elif preset == "trigger":
-            chords.append(chord(preset, "talk", *trig("B")))
-        else:
-            sources.append(button(preset, "talk", *face["B"]))
-        body = {"chords": chords}
-        if sources:
-            body["sources"] = sources
-        out[f"/actions/{preset}"] = body
-    return {"controller_type": ctype, "name": f"fuelCell defaults ({ctype})",
-            "description": "Talk: A+B / Trigger+B / B. Trigger + A paste, Y copy, X select all.",
-            "bindings": out}
+    for button, (hand, comp) in where.items():
+        out[f"/actions/{button}"] = {"sources": [{
+            "path": f"/user/hand/{hand}/input/{comp}",
+            "mode": "trigger" if comp == "trigger" else "button",
+            "parameters": {},
+            "inputs": {"click": {"output": f"/actions/{button}/in/press"}},
+        }]}
+    return {
+        "action_manifest_version": 0,
+        "alias_info": {},
+        "app_key": APP_KEY,
+        "bindings": out,
+        "category": "steamvr_input",
+        "controller_type": ctype,
+        "description": "Hold A + B to talk. Trigger + A pastes, Y copies, X selects all.",
+        "name": f"fuelCell defaults ({ctype})",
+        "options": {},
+        "simulated_actions": [],
+    }
 
 
 def main():
     manifest = {
         "default_bindings": [{"controller_type": c, "binding_url": f"bindings_{c}.json"}
                              for c in CONTROLLERS],
-        "action_sets": [{"name": f"/actions/{p}", "usage": "single"} for p in PRESETS],
-        "actions": [{"name": f"/actions/{p}/in/{a}", "type": "boolean"}
-                    for p in PRESETS for a in ACTIONS],
+        "action_sets": [{"name": f"/actions/{b}", "usage": "single"} for b in BUTTONS],
+        "actions": [{"name": f"/actions/{b}/in/press", "type": "boolean"} for b in BUTTONS],
         "localization": [dict(
             {"language_tag": "en_US"},
-            **{f"/actions/{p}": label for p, label in PRESETS.items()},
-            **{f"/actions/{p}/in/{a}": LABELS[a] for p in PRESETS for a in ACTIONS},
+            **{f"/actions/{b}": name for b, (name, _) in BUTTONS.items()},
+            **{f"/actions/{b}/in/press": what for b, (_, what) in BUTTONS.items()},
         )],
     }
     for old in OUT.glob("*.json"):
         old.unlink()
     (OUT / "actions.json").write_text(json.dumps(manifest, indent=2) + "\n")
-    for ctype, face in CONTROLLERS.items():
-        (OUT / f"bindings_{ctype}.json").write_text(json.dumps(bindings(ctype, face), indent=2) + "\n")
+    for ctype, where in CONTROLLERS.items():
+        (OUT / f"bindings_{ctype}.json").write_text(json.dumps(bindings(ctype, where), indent=2) + "\n")
 
 
 if __name__ == "__main__":

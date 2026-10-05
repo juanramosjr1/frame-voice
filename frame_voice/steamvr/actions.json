@@ -15,101 +15,61 @@
   ],
   "action_sets": [
     {
-      "name": "/actions/ab",
+      "name": "/actions/a",
+      "usage": "single"
+    },
+    {
+      "name": "/actions/b",
+      "usage": "single"
+    },
+    {
+      "name": "/actions/x",
+      "usage": "single"
+    },
+    {
+      "name": "/actions/y",
       "usage": "single"
     },
     {
       "name": "/actions/trigger",
       "usage": "single"
-    },
-    {
-      "name": "/actions/hold_b",
-      "usage": "single"
     }
   ],
   "actions": [
     {
-      "name": "/actions/ab/in/talk",
+      "name": "/actions/a/in/press",
       "type": "boolean"
     },
     {
-      "name": "/actions/ab/in/copy",
+      "name": "/actions/b/in/press",
       "type": "boolean"
     },
     {
-      "name": "/actions/ab/in/paste",
+      "name": "/actions/x/in/press",
       "type": "boolean"
     },
     {
-      "name": "/actions/ab/in/select_all",
+      "name": "/actions/y/in/press",
       "type": "boolean"
     },
     {
-      "name": "/actions/ab/in/enter",
-      "type": "boolean"
-    },
-    {
-      "name": "/actions/trigger/in/talk",
-      "type": "boolean"
-    },
-    {
-      "name": "/actions/trigger/in/copy",
-      "type": "boolean"
-    },
-    {
-      "name": "/actions/trigger/in/paste",
-      "type": "boolean"
-    },
-    {
-      "name": "/actions/trigger/in/select_all",
-      "type": "boolean"
-    },
-    {
-      "name": "/actions/trigger/in/enter",
-      "type": "boolean"
-    },
-    {
-      "name": "/actions/hold_b/in/talk",
-      "type": "boolean"
-    },
-    {
-      "name": "/actions/hold_b/in/copy",
-      "type": "boolean"
-    },
-    {
-      "name": "/actions/hold_b/in/paste",
-      "type": "boolean"
-    },
-    {
-      "name": "/actions/hold_b/in/select_all",
-      "type": "boolean"
-    },
-    {
-      "name": "/actions/hold_b/in/enter",
+      "name": "/actions/trigger/in/press",
       "type": "boolean"
     }
   ],
   "localization": [
     {
       "language_tag": "en_US",
-      "/actions/ab": "Hold A + B",
-      "/actions/trigger": "Trigger + B",
-      "/actions/hold_b": "Hold B",
-      "/actions/ab/in/talk": "Hold to talk",
-      "/actions/ab/in/copy": "Copy",
-      "/actions/ab/in/paste": "Paste",
-      "/actions/ab/in/select_all": "Select all",
-      "/actions/ab/in/enter": "Enter",
-      "/actions/trigger/in/talk": "Hold to talk",
-      "/actions/trigger/in/copy": "Copy",
-      "/actions/trigger/in/paste": "Paste",
-      "/actions/trigger/in/select_all": "Select all",
-      "/actions/trigger/in/enter": "Enter",
-      "/actions/hold_b/in/talk": "Hold to talk",
-      "/actions/hold_b/in/copy": "Copy",
-      "/actions/hold_b/in/paste": "Paste",
-      "/actions/hold_b/in/select_all": "Select all",
-      "/actions/hold_b/in/enter": "Enter"
+      "/actions/a": "Button A",
+      "/actions/b": "Button B",
+      "/actions/x": "Button X",
+      "/actions/y": "Button Y",
+      "/actions/trigger": "Trigger",
+      "/actions/a/in/press": "A: talk (with B), paste (with the trigger)",
+      "/actions/b/in/press": "B: talk",
+      "/actions/x/in/press": "X: select all (with the trigger)",
+      "/actions/y/in/press": "Y: copy (with the trigger)",
+      "/actions/trigger/in/press": "Trigger: used together with A, B, X and Y"
     }
   ]
 }

@@ -107,6 +107,62 @@ def test_typed_keys_never_trigger_our_buttons(win, monkeypatch):
     assert opened == [] and win.engine.calls == []
 
 
+def test_settings_takes_no_focus_and_ignores_typed_keys(win, monkeypatch):
+    from PySide6.QtCore import QEvent, Qt
+    from PySide6.QtGui import QKeyEvent
+
+    s = ui.Settings(win, win.cfg, win.engine, win.vr)
+    takers = [type(w).__name__ for w in s.findChildren(QtWidgets.QWidget)
+              if w.focusPolicy() != Qt.NoFocus]
+    assert takers == []
+    quits = []
+    monkeypatch.setattr(QtWidgets.QApplication, "quit", lambda: quits.append(True))
+    s.show()
+    for w in [s] + s.findChildren(QtWidgets.QWidget):
+        for key, text in ((Qt.Key_Space, " "), (Qt.Key_Return, "\r"), (Qt.Key_Escape, "")):
+            QtWidgets.QApplication.sendEvent(w, QKeyEvent(QEvent.KeyPress, key, Qt.NoModifier, text))
+    assert quits == [] and s.isVisible()
+    s.close()
+
+
+def test_controller_presses_only_light_up_while_settings_is_open(win):
+    win._testing = True
+    win.on_controller("talk", True)
+    win.on_controller("talk", False)  # releases always pass
+    assert win.engine.calls == [("talk", False)]
+    win._testing = False
+    win.on_controller("paste", True)
+    assert win.engine.calls[-1] == ("paste", True)
+
+
+def test_turn_on_button_shows_when_setting_is_off(win, app):
+    calls = []
+    win.vr.enable_global_input = lambda: calls.append(True)
+    win.vr.status = "setting"
+    win.on_vr_status()
+    assert not win.turn_on.isHidden()
+    assert "SteamVR setting" in win.controller.text()
+    win.turn_on.click()
+    assert calls == [True]
+    win.vr.status, win.vr.summary = "on", "ok"
+    win.on_vr_status()
+    assert win.turn_on.isHidden()
+    assert win.controller.text().startswith("Hold A and B together")
+    win.on_state(READY, "Ready")
+    assert win.hint.text() == "Click a text box, then hold A + B and talk."
+
+
+def test_settings_test_panel_lights_buttons(win):
+    s = ui.Settings(win, win.cfg, win.engine, win.vr)
+    win.vr.snapshot = lambda: {"summary": "x", "status": "setting", "buttons": {"a"},
+                               "held": set(), "bound": {"a": True, "b": True}}
+    s._refresh_test()
+    assert not s.turn_on.isHidden()
+    assert "#2ee6b8" in s.pills["btn:a"].styleSheet()       # lit
+    assert "dashed" in s.pills["btn:trigger"].styleSheet()  # not bound
+    s.close()
+
+
 def test_focus_guard_passes_when_window_inactive(win):
     win._active = False
     assert win.give_focus_back() is True

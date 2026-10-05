@@ -1,173 +1,83 @@
 {
-  "controller_type": "knuckles",
-  "name": "fuelCell defaults (knuckles)",
-  "description": "Talk: A+B / Trigger+B / B. Trigger + A paste, Y copy, X select all.",
+  "action_manifest_version": 0,
+  "alias_info": {},
+  "app_key": "fuelcell.voicetyping",
   "bindings": {
-    "/actions/ab": {
-      "chords": [
+    "/actions/a": {
+      "sources": [
         {
-          "output": "/actions/ab/in/paste",
-          "inputs": [
-            [
-              "/user/hand/right/input/trigger",
-              "click"
-            ],
-            [
-              "/user/hand/right/input/a",
-              "click"
-            ]
-          ]
-        },
-        {
-          "output": "/actions/ab/in/copy",
-          "inputs": [
-            [
-              "/user/hand/left/input/trigger",
-              "click"
-            ],
-            [
-              "/user/hand/left/input/b",
-              "click"
-            ]
-          ]
-        },
-        {
-          "output": "/actions/ab/in/select_all",
-          "inputs": [
-            [
-              "/user/hand/left/input/trigger",
-              "click"
-            ],
-            [
-              "/user/hand/left/input/a",
-              "click"
-            ]
-          ]
-        },
-        {
-          "output": "/actions/ab/in/talk",
-          "inputs": [
-            [
-              "/user/hand/right/input/a",
-              "click"
-            ],
-            [
-              "/user/hand/right/input/b",
-              "click"
-            ]
-          ]
+          "path": "/user/hand/right/input/a",
+          "mode": "button",
+          "parameters": {},
+          "inputs": {
+            "click": {
+              "output": "/actions/a/in/press"
+            }
+          }
         }
       ]
     },
-    "/actions/trigger": {
-      "chords": [
-        {
-          "output": "/actions/trigger/in/paste",
-          "inputs": [
-            [
-              "/user/hand/right/input/trigger",
-              "click"
-            ],
-            [
-              "/user/hand/right/input/a",
-              "click"
-            ]
-          ]
-        },
-        {
-          "output": "/actions/trigger/in/copy",
-          "inputs": [
-            [
-              "/user/hand/left/input/trigger",
-              "click"
-            ],
-            [
-              "/user/hand/left/input/b",
-              "click"
-            ]
-          ]
-        },
-        {
-          "output": "/actions/trigger/in/select_all",
-          "inputs": [
-            [
-              "/user/hand/left/input/trigger",
-              "click"
-            ],
-            [
-              "/user/hand/left/input/a",
-              "click"
-            ]
-          ]
-        },
-        {
-          "output": "/actions/trigger/in/talk",
-          "inputs": [
-            [
-              "/user/hand/right/input/trigger",
-              "click"
-            ],
-            [
-              "/user/hand/right/input/b",
-              "click"
-            ]
-          ]
-        }
-      ]
-    },
-    "/actions/hold_b": {
-      "chords": [
-        {
-          "output": "/actions/hold_b/in/paste",
-          "inputs": [
-            [
-              "/user/hand/right/input/trigger",
-              "click"
-            ],
-            [
-              "/user/hand/right/input/a",
-              "click"
-            ]
-          ]
-        },
-        {
-          "output": "/actions/hold_b/in/copy",
-          "inputs": [
-            [
-              "/user/hand/left/input/trigger",
-              "click"
-            ],
-            [
-              "/user/hand/left/input/b",
-              "click"
-            ]
-          ]
-        },
-        {
-          "output": "/actions/hold_b/in/select_all",
-          "inputs": [
-            [
-              "/user/hand/left/input/trigger",
-              "click"
-            ],
-            [
-              "/user/hand/left/input/a",
-              "click"
-            ]
-          ]
-        }
-      ],
+    "/actions/b": {
       "sources": [
         {
           "path": "/user/hand/right/input/b",
           "mode": "button",
+          "parameters": {},
           "inputs": {
             "click": {
-              "output": "/actions/hold_b/in/talk"
+              "output": "/actions/b/in/press"
+            }
+          }
+        }
+      ]
+    },
+    "/actions/x": {
+      "sources": [
+        {
+          "path": "/user/hand/left/input/a",
+          "mode": "button",
+          "parameters": {},
+          "inputs": {
+            "click": {
+              "output": "/actions/x/in/press"
+            }
+          }
+        }
+      ]
+    },
+    "/actions/y": {
+      "sources": [
+        {
+          "path": "/user/hand/left/input/b",
+          "mode": "button",
+          "parameters": {},
+          "inputs": {
+            "click": {
+              "output": "/actions/y/in/press"
+            }
+          }
+        }
+      ]
+    },
+    "/actions/trigger": {
+      "sources": [
+        {
+          "path": "/user/hand/right/input/trigger",
+          "mode": "trigger",
+          "parameters": {},
+          "inputs": {
+            "click": {
+              "output": "/actions/trigger/in/press"
             }
           }
         }
       ]
     }
-  }
+  },
+  "category": "steamvr_input",
+  "controller_type": "knuckles",
+  "description": "Hold A + B to talk. Trigger + A pastes, Y copies, X selects all.",
+  "name": "fuelCell defaults (knuckles)",
+  "options": {},
+  "simulated_actions": []
 }

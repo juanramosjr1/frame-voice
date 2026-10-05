@@ -1,11 +1,14 @@
-"""Give keyboard focus back to the user's text box.
+"""Keep keyboard focus on the user's text box, not our window.
 
-Clicking our window can make it the active window (KWin doesn't always
-honour "never take focus"), and then typed text would land in our own window
-instead of the text box the user picked. Before sending keys we hand focus
-back to the window the user was in: the topmost normal window that isn't
-ours. On KDE (SteamOS desktop) that's done with a tiny KWin script over
-D-Bus, which works on both Wayland and X11.
+Clicking our window can make it the active window (KWin ignores Qt's "never
+take focus" hint), and then typed text would land in our own window instead
+of the text box the user picked. Two fixes for KDE (the SteamOS desktop):
+
+1. A KWin window rule that forces "accept focus: no" for our window, the
+   way on-screen keyboards do it. Then clicking our buttons never moves focus.
+2. As a backup, right before sending keys, hand focus back to the window the
+   user was in (the topmost normal window that isn't ours), using a tiny
+   KWin script over D-Bus, or plain X11 when KWin isn't there.
 """
 
 import os
@@ -167,6 +170,95 @@ def activate_previous_x11(our_window_ids=()):
         return True
     finally:
         x.XCloseDisplay(dpy)
+
+
+# -- KWin window rule ------------------------------------------------------------
+RULE_GROUP = "frame-voice"
+RULE = {
+    "Description": "fuelCell Voice Typing: never take keyboard focus",
+    "wmclass": OUR_CLASS,
+    "wmclassmatch": "1",          # exact match on the window class
+    "wmclasscomplete": "false",
+    "types": "1",                 # normal windows only, so dialogs still work
+    "acceptfocus": "false",
+    "acceptfocusrule": "2",       # force
+}
+
+
+class KConfig:
+    """Reads and writes ~/.config/kwinrulesrc with KDE's own command-line tools."""
+
+    FILE = "kwinrulesrc"
+
+    def __init__(self):
+        self.tools = None
+        for version in ("6", "5"):
+            write, read = shutil.which(f"kwriteconfig{version}"), shutil.which(f"kreadconfig{version}")
+            if write and read:
+                self.tools = (write, read)
+                break
+
+    def _run(self, args):
+        return subprocess.run(args, capture_output=True, text=True, timeout=5).stdout.strip()
+
+    def get(self, group, key):
+        return self._run([self.tools[1], "--file", self.FILE, "--group", group, "--key", key])
+
+    def put(self, group, key, value):
+        self._run([self.tools[0], "--file", self.FILE, "--group", group, "--key", key, value])
+
+    def delete(self, group, key):
+        self._run([self.tools[0], "--file", self.FILE, "--group", group, "--key", key, "--delete"])
+
+
+def _rule_list(conf):
+    rules = [r for r in conf.get("General", "rules").split(",") if r]
+    if not rules:  # older files number their rules 1..count instead
+        count = conf.get("General", "count")
+        rules = [str(i) for i in range(1, int(count) + 1)] if count.isdigit() else []
+    return rules
+
+
+def _set_rule_list(conf, rules):
+    conf.put("General", "rules", ",".join(rules))
+    conf.put("General", "count", str(len(rules)))
+
+
+def install_kwin_rule(conf=None):
+    """Add our KWin rule if it isn't there yet. Returns True if it's in place."""
+    conf = conf or KConfig()
+    if getattr(conf, "tools", True) is None:
+        return False
+    try:
+        rules = _rule_list(conf)
+        if RULE_GROUP in rules and all(conf.get(RULE_GROUP, k) == v for k, v in RULE.items()):
+            return True
+        for key, value in RULE.items():
+            conf.put(RULE_GROUP, key, value)
+        if RULE_GROUP not in rules:
+            _set_rule_list(conf, rules + [RULE_GROUP])
+    except (OSError, subprocess.SubprocessError, ValueError) as err:
+        log.info("couldn't add the KWin rule: %s", err)
+        return False
+    _dbus("/KWin", "org.kde.KWin.reconfigure")
+    log.info("added KWin rule so our window never takes keyboard focus")
+    return True
+
+
+def remove_kwin_rule(conf=None):
+    conf = conf or KConfig()
+    if getattr(conf, "tools", True) is None:
+        return False
+    try:
+        rules = _rule_list(conf)
+        if RULE_GROUP in rules:
+            _set_rule_list(conf, [r for r in rules if r != RULE_GROUP])
+        for key in RULE:
+            conf.delete(RULE_GROUP, key)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return False
+    _dbus("/KWin", "org.kde.KWin.reconfigure")
+    return True
 
 
 def activate_previous(our_window_ids=()):

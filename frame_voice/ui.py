@@ -23,7 +23,7 @@ from . import config as config_mod
 from . import focus
 from .app import ERROR, LISTENING, LOADING, READY, WORKING
 from .log import log
-from .vr import PRESETS, SteamVR
+from .vr import BUTTON_LABELS, BUTTONS, PRESETS, SteamVR, preset_hint
 
 # -- look -------------------------------------------------------------------
 BG = "#0d1016"
@@ -492,10 +492,7 @@ class Settings(QDialog):
 
         lay.addWidget(self._section("APP"))
         self._toggle(lay, "Show the fuelCell intro", "show_intro")
-        auto = QCheckBox("Start automatically when the headset turns on")
-        auto.setChecked(config_mod.autostart_enabled())
-        auto.toggled.connect(lambda on: config_mod.set_autostart(on, launch_command()))
-        lay.addWidget(auto)
+        self._toggle(lay, "Start automatically with SteamVR", "autostart", self._autostart)
 
         lay.addWidget(self._section("CONTROLLER SHORTCUTS"))
         seg2 = QHBoxLayout()
@@ -510,14 +507,18 @@ class Settings(QDialog):
             self.presets.addButton(b)
             seg2.addWidget(b)
         lay.addLayout(seg2)
-        self.preset_hint = QLabel(PRESETS[cfg["controller_preset"]][1])
+        self.preset_hint = QLabel()
         self.preset_hint.setObjectName("hint")
         self.preset_hint.setWordWrap(True)
         lay.addWidget(self.preset_hint)
+        self._toggle(lay, "Copy and paste shortcuts (Trigger + A, Y, X)", "edit_shortcuts",
+                     self._options)
+        self._toggle(lay, "Keep shortcuts on during VR games", "in_games", self._options)
         custom = QPushButton("Customize buttons in SteamVR")
         custom.setObjectName("small")
         custom.clicked.connect(self._customize)
         lay.addWidget(custom, 0, Qt.AlignLeft)
+        self._update_hint()
 
         # live controller test: press buttons and watch them light up
         test = QFrame()
@@ -532,16 +533,27 @@ class Settings(QDialog):
         self.vr_line.setObjectName("hint")
         self.vr_line.setWordWrap(True)
         tl.addWidget(self.vr_line)
-        pills = QHBoxLayout()
+        self.turn_on = QPushButton("Turn on")
+        self.turn_on.setObjectName("primary")
+        self.turn_on.clicked.connect(self._turn_on)
+        self.turn_on.hide()
+        tl.addWidget(self.turn_on, 0, Qt.AlignLeft)
+        # buttons SteamVR reports, then what they add up to
         self.pills = {}
-        for action, label in (("talk", "Talk"), ("copy", "Copy"), ("paste", "Paste"),
-                              ("select_all", "Select all")):
-            pill = QLabel(label)
-            pill.setAlignment(Qt.AlignCenter)
-            pill.setMinimumHeight(34)
-            self.pills[action] = pill
-            pills.addWidget(pill)
-        tl.addLayout(pills)
+        for row in ([(f"btn:{b}", BUTTON_LABELS[b]) for b in BUTTONS],
+                    [("talk", "Talk"), ("copy", "Copy"), ("paste", "Paste"),
+                     ("select_all", "Select all")]):
+            pills = QHBoxLayout()
+            for key, label in row:
+                pill = QLabel(label)
+                pill.setAlignment(Qt.AlignCenter)
+                pill.setMinimumHeight(34)
+                self.pills[key] = pill
+                pills.addWidget(pill)
+            tl.addLayout(pills)
+        note = QLabel("While this is open, buttons only light up here.")
+        note.setObjectName("hint")
+        tl.addWidget(note)
         lay.addWidget(test)
         self._refresh_test()
         self._test_timer = QTimer(self, interval=100)
@@ -571,16 +583,21 @@ class Settings(QDialog):
         self.output.hide()
         lay.addWidget(self.output)
 
+        # Nothing here takes keyboard focus, so stray typed keys can't press
+        # a button (dictation typed into this window must never "click" Quit).
+        for w in self.findChildren(QWidget):
+            w.setFocusPolicy(Qt.NoFocus)
+
     def _section(self, text):
         label = QLabel(text)
         label.setObjectName("cardTitle")
         return label
 
-    def _toggle(self, lay, text, key):
+    def _toggle(self, lay, text, key, then=None):
         box = QCheckBox(text)
         box.setFocusPolicy(Qt.NoFocus)
         box.setChecked(bool(self.cfg.get(key)))
-        box.toggled.connect(lambda on: self._set(key, on))
+        box.toggled.connect(lambda on: (self._set(key, on), then and then()))
         lay.addWidget(box)
 
     def _set(self, key, value):
@@ -592,22 +609,49 @@ class Settings(QDialog):
             self.engine.reload_model(name)
             config_mod.save(self.cfg)
 
+    def _update_hint(self):
+        self.preset_hint.setText(preset_hint(self.cfg["controller_preset"],
+                                             self.cfg["edit_shortcuts"]))
+
     def _preset(self, key):
         self._set("controller_preset", key)
-        self.preset_hint.setText(PRESETS[key][1])
         if self.vr:
             self.vr.set_preset(key)
+        self._update_hint()
         self.parent().update_controller_hint()
+
+    def _options(self):
+        if self.vr:
+            self.vr.set_options(edits=self.cfg["edit_shortcuts"], in_games=self.cfg["in_games"])
+        self._update_hint()
+        self.parent().update_controller_hint()
+
+    def _autostart(self):
+        if self.vr:
+            self.vr.set_autolaunch(self.cfg["autostart"])
+        if not self.cfg["autostart"]:
+            config_mod.remove_desktop_autostart()
+
+    def _turn_on(self):
+        if self.vr:
+            self.vr.enable_global_input()
+        self.turn_on.setText("Turning on...")
 
     def _refresh_test(self):
         snap = self.vr.snapshot() if self.vr else {}
         self.vr_line.setText(snap.get("summary", "SteamVR isn't connected."))
-        held = snap.get("held", set())
+        self.turn_on.setVisible(snap.get("status") in ("setting", "partial"))
+        lit = snap.get("held", set()) | {f"btn:{b}" for b in snap.get("buttons", ())}
         bound = snap.get("bound", {})
-        for action, pill in self.pills.items():
-            if action in held:
+        usable = {f"btn:{b}" for b, on in bound.items() if on}
+        if snap.get("read_only"):
+            usable |= {f"btn:{b}" for b in BUTTONS}
+        if usable:
+            usable |= {"talk", "copy", "paste", "select_all"}
+        for key, pill in self.pills.items():
+            if key in lit:
                 style = f"background: {ACCENT}; color: #04140f;"
-            elif bound.get(action):
+            elif key in usable:
                 style = f"background: {CARD_HOVER}; color: {TEXT};"
             else:
                 style = f"background: transparent; color: #4b5263; border: 1px dashed {BORDER};"
@@ -627,11 +671,6 @@ class Settings(QDialog):
             check()
         self.output.setPlainText(buf.getvalue())
         self.output.show()
-
-
-def launch_command():
-    exe = os.path.join(os.path.dirname(sys.executable), "frame-voice")
-    return exe if os.path.exists(exe) else f"{sys.executable} -m frame_voice"
 
 
 # -- main window ----------------------------------------------------------------
@@ -658,7 +697,10 @@ class MainWindow(QWidget):
         self.setWindowIcon(app_icon())
         self.cfg = cfg
         self._active = False  # read from worker threads
+        self._testing = False  # Settings is open: controller buttons only light up there
         self._window_ids = ()
+        self._shown = False
+        self._plain_ready = False  # the hint shows the usual "how to talk" text
         self.bridge = Bridge()
         self.engine = engine_cls(cfg, on_state=self.bridge.state.emit,
                                  on_transcript=self.bridge.transcript.emit,
@@ -666,8 +708,9 @@ class MainWindow(QWidget):
         self.bridge.state.connect(self.on_state)
         self.bridge.transcript.connect(self.on_transcript)
         QApplication.instance().installEventFilter(self)
-        self.vr = SteamVR(self.engine.hotkey, cfg["controller_preset"],
-                          on_status=self.bridge.vr_status.emit)
+        self.vr = SteamVR(self.on_controller, cfg["controller_preset"],
+                          on_status=self.bridge.vr_status.emit, edits=cfg["edit_shortcuts"],
+                          in_games=cfg["in_games"], autolaunch=cfg["autostart"])
         self.bridge.vr_status.connect(self.on_vr_status)
 
         root = QVBoxLayout(self)
@@ -709,7 +752,7 @@ class MainWindow(QWidget):
         self.status.setAlignment(Qt.AlignCenter)
         root.addWidget(self.status)
         root.addSpacing(4)
-        self.hint = QLabel("Click a text box first, then tap the mic.")
+        self.hint = QLabel(self.ready_hint())
         self.hint.setObjectName("hint")
         self.hint.setAlignment(Qt.AlignCenter)
         self.hint.setWordWrap(True)
@@ -776,9 +819,15 @@ class MainWindow(QWidget):
         foot.addWidget(self.vr_dot, 0, Qt.AlignTop)
         foot.addSpacing(4)
         foot.addWidget(self.controller, 1)
+        self.turn_on = QPushButton("Turn on")
+        self.turn_on.setObjectName("small")
+        self.turn_on.setFocusPolicy(Qt.NoFocus)
+        self.turn_on.setCursor(Qt.PointingHandCursor)
+        self.turn_on.clicked.connect(self.turn_on_global_input)
+        self.turn_on.hide()
+        foot.addWidget(self.turn_on, 0, Qt.AlignVCenter)
         root.addLayout(foot)
-        self.vr_text = "Connecting to SteamVR..."
-        self.on_vr_status(self.vr_text)
+        self.on_vr_status("")
 
         self.setFixedWidth(470)
         self.adjustSize()
@@ -792,19 +841,45 @@ class MainWindow(QWidget):
         if self.engine.state == READY and self.cfg.get("keyboard_hotkeys"):
             self.engine.start_hotkeys()
 
-    def on_vr_status(self, text):
-        self.vr_text = text
-        on = text.startswith("Controller shortcuts on")
-        color = ACCENT if on else MUTED
+    def on_vr_status(self, _text=""):
+        status = self.vr.status
+        color = {"on": ACCENT, "partial": ACCENT, "setting": AMBER, "nobind": AMBER,
+                 "error": RED}.get(status, MUTED)
         self.vr_dot.setStyleSheet(f"background: {color}; border-radius: 5px;")
+        self.turn_on.setVisible(status in ("setting", "partial"))
+        self.turn_on.setText("Turn on")
         self.update_controller_hint()
 
     def update_controller_hint(self):
-        hint = PRESETS[self.cfg["controller_preset"]][1]
-        if self.vr_text.startswith("Controller shortcuts on"):
-            self.controller.setText(hint)
+        if self.vr.status == "on":
+            self.controller.setText(preset_hint(self.cfg["controller_preset"],
+                                                self.cfg["edit_shortcuts"]))
+        elif self.vr.status == "setting":
+            self.controller.setText("Controller shortcuts need one SteamVR setting.")
+        elif self.vr.status == "partial":
+            self.controller.setText("Shortcuts work. Turn on one SteamVR setting so the "
+                                    "buttons don't also reach other apps.")
         else:
-            self.controller.setText(f"{self.vr_text}  Controller shortcuts start with SteamVR.")
+            self.controller.setText(self.vr.summary)
+        if self._plain_ready:
+            self.hint.setText(self.ready_hint())
+
+    def ready_hint(self):
+        if self.vr.status not in ("on", "partial"):
+            return "Click a text box first, then tap the mic."
+        label = PRESETS[self.cfg["controller_preset"]][0]
+        combo = label[5:] if label.startswith("Hold ") else label
+        return f"Click a text box, then hold {combo} and talk."
+
+    def turn_on_global_input(self):
+        self.vr.enable_global_input()
+        self.turn_on.setText("Turning on...")
+
+    def on_controller(self, action, pressed):
+        """Controller combos from the SteamVR thread."""
+        if self._testing and pressed:
+            return
+        self.engine.hotkey(action, pressed)
 
     def on_mic(self):
         if self.engine.state == ERROR:
@@ -818,14 +893,15 @@ class MainWindow(QWidget):
         color = {ERROR: RED, LISTENING: RED, WORKING: AMBER}.get(state, TEXT)
         self.status.setStyleSheet(f"color: {color};")
         texts = {
-            READY: ("Tap to talk", "Click a text box first, then tap the mic."),
+            READY: ("Tap to talk", self.ready_hint()),
             LISTENING: ("Listening...", "Tap again when you're done."),
             WORKING: ("Typing...", "Turning your words into text."),
             LOADING: (message or "Getting ready...", "This only takes a moment."),
             ERROR: ("Something's wrong", message + "\nTap the mic to try again."),
         }
         title, hint = texts.get(state, (message, ""))
-        if state == READY and message not in ("", "Ready"):
+        self._plain_ready = state == READY and message in ("", "Ready")
+        if state == READY and not self._plain_ready:
             hint = message
         self.status.setText(title)
         self.hint.setText(hint)
@@ -860,11 +936,10 @@ class MainWindow(QWidget):
     KEY_EVENTS = (QEvent.KeyPress, QEvent.KeyRelease, QEvent.ShortcutOverride)
 
     def eventFilter(self, obj, event):
-        # Never react to typed keys: if our window ends up with focus, those
-        # keys were meant for another app (a space used to "click" Settings).
-        if event.type() in self.KEY_EVENTS and isinstance(obj, QWidget) and obj.window() is self:
-            return True
-        return False
+        # Never react to typed keys in any of our windows: if one ends up with
+        # focus, those keys were meant for another app (a space used to
+        # "click" Settings). The app has no text fields, so nothing is lost.
+        return event.type() in self.KEY_EVENTS and isinstance(obj, QWidget)
 
     def give_focus_back(self):
         """Called from a worker thread right before keys are sent."""
@@ -889,15 +964,36 @@ class MainWindow(QWidget):
         event.ignore()
         self.hide()
 
-    def bring_back(self):
+    def present(self, fade=True):
+        """Show the window (centred the first time), fading in."""
+        if not self._shown:
+            self._shown = True
+            screen = QGuiApplication.primaryScreen().availableGeometry()
+            self.move(screen.center() - self.rect().center())
+        if self.isVisible():
+            self.raise_()
+            return
+        self.setWindowOpacity(0.0 if fade else 1.0)
         self.show()
         self.raise_()
+        if fade:
+            anim = QVariantAnimation(self, startValue=0.0, endValue=1.0, duration=220,
+                                     easingCurve=QEasingCurve.OutCubic)
+            anim.valueChanged.connect(self.setWindowOpacity)
+            anim.start()
+
+    def bring_back(self):
+        self.present()
 
     def open_settings(self):
-        Settings(self, self.cfg, self.engine, self.vr).exec()
+        self._testing = True
+        try:
+            Settings(self, self.cfg, self.engine, self.vr).exec()
+        finally:
+            self._testing = False
 
 
-def run(cfg, engine_cls, show_intro=True):
+def run(cfg, engine_cls, show_intro=True, background=False):
     # Under XWayland the "never take focus" hint is honoured reliably.
     if os.environ.get("DISPLAY") and "QT_QPA_PLATFORM" not in os.environ:
         os.environ["QT_QPA_PLATFORM"] = "xcb"
@@ -925,21 +1021,15 @@ def run(cfg, engine_cls, show_intro=True):
     win = MainWindow(cfg, engine_cls)
     server.newConnection.connect(lambda: (server.nextPendingConnection(), win.bring_back()))
     win.start()  # load the speech model while the intro plays
+    # On KDE, make sure clicking our window never moves keyboard focus.
+    threading.Thread(target=focus.install_kwin_rule, daemon=True).start()
 
-    def show_main():
-        screen = QGuiApplication.primaryScreen().availableGeometry()
-        win.move(screen.center() - win.rect().center())
-        win.setWindowOpacity(0.0)
-        win.show()
-        fade = QVariantAnimation(win, startValue=0.0, endValue=1.0, duration=220,
-                                 easingCurve=QEasingCurve.OutCubic)
-        fade.valueChanged.connect(win.setWindowOpacity)
-        fade.start()
-
-    if show_intro:
+    if background:
+        pass  # started by SteamVR: shortcuts only until the app is opened
+    elif show_intro:
         intro = Intro()
-        intro.finished.connect(show_main)
+        intro.finished.connect(win.present)
         intro.start()
     else:
-        show_main()
+        win.present()
     return app.exec()
