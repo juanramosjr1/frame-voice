@@ -83,6 +83,8 @@ If you want different buttons, tap **Customize buttons in SteamVR**. That opens 
 
 Settings also has: speech model (**Fast / Balanced / Most accurate**, picked once and used every time), add a space after each dictation, press Enter after each dictation, and start automatically with SteamVR.
 
+**My words** is for names and words it keeps getting wrong, like fuelCell or a game's name. Tap **Edit my words**, put each one on its own line, and save. Your next dictation spells them your way. (The list is the file `~/.config/frame-voice/words.txt`, if you'd rather open it yourself.) Only add the words it gets wrong: a short list works best.
+
 ---
 
 ## Troubleshooting
@@ -95,6 +97,7 @@ Settings also has: speech model (**Fast / Balanced / Most accurate**, picked onc
 | The app doesn't start with the headset | Run `~/.local/bin/frame-voice --check`. It should say **Starts with SteamVR**, and while SteamVR runs, **Running in the background**. If not, turn on **Start automatically with SteamVR** in Settings, or run the installer again. |
 | `frame-voice: command not found` | Open a new Konsole window, or use the full path: `~/.local/bin/frame-voice --check`. |
 | "Didn't catch that" | Speak a little closer or longer, or try **Most accurate** in Settings. |
+| Words come out wrong | Pick **Most accurate** in Settings, talk close to the mic, and keep holding until you've said the last word. For a name, add it to **My words** in Settings. |
 | Typing is slow to start | Use **Fast** in Settings. |
 | Wrong characters | The app types as a US keyboard layout. |
 
@@ -116,7 +119,7 @@ bash ~/.local/share/frame-voice/uninstall.sh
 
 ### Testing
 
-Every push runs the full test suite on GitHub on both **x86 and ARM64** Linux. It runs the real installer, types through a real virtual keyboard and checks the key presses arrive, has Whisper transcribe a synthesized sentence, and drives the controller logic frame by frame against a stand-in for SteamVR. It also starts and stops a stand-in `steamvr.service` in a real user session and checks the app starts and stops with it.
+Every push runs the full test suite on GitHub on both **x86 and ARM64** Linux. It runs the real installer, types through a real virtual keyboard and checks the key presses arrive, measures dictation accuracy on synthesized speech (clear, quiet and noisy) against the previous settings, checks that names on a word list come out spelled the list's way, and drives the controller logic frame by frame against a stand-in for SteamVR. It also starts and stops a stand-in `steamvr.service` in a real user session and checks the app starts and stops with it.
 
 Not yet verified on a real Steam Frame:
 - typing into the Steam store inside the SteamVR dashboard

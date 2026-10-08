@@ -204,7 +204,7 @@ def test_my_words_in_settings(win, tmp_path, monkeypatch):
     monkeypatch.setattr(ui.QDesktopServices, "openUrl",
                         lambda url: opened.append(url.toLocalFile()) or True)
     s = ui.Settings(win, win.cfg, win.engine, win.vr)
-    assert "None added yet" in s.words_line.text()
+    assert "like fuelCell" in s.words_line.text()
     assert s.words_hint.isHidden()
     edit = [b for b in s.findChildren(QtWidgets.QPushButton) if b.text() == "Edit my words"]
     edit[0].click()
@@ -218,14 +218,15 @@ def test_my_words_in_settings(win, tmp_path, monkeypatch):
     monkeypatch.setattr(ui.QDesktopServices, "openUrl", lambda url: False)
     edit[0].click()
     assert "words.txt" in s.words_hint.text()
-    s.close()
+    s.accept()
+    assert not s._words_timer.isActive() and not s._test_timer.isActive()
 
 
 def test_words_summary():
-    assert "None added yet" in ui.words_summary([])
+    assert "like fuelCell" in ui.words_summary([])
     assert ui.words_summary(["fuelCell", "Kayleigh"]) == "fuelCell, Kayleigh"
     many = ui.words_summary([f"Name{i}" for i in range(30)])
-    assert many.endswith(" more") and len(many) < 90
+    assert many.endswith(" more") and len(many) < 60
 
 
 def test_controller_preset_switch(win, tmp_path, monkeypatch):

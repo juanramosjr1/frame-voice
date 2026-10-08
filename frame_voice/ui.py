@@ -14,8 +14,8 @@ from PySide6.QtGui import (QColor, QDesktopServices, QFont, QFontMetricsF, QGuiA
                            QRadialGradient)
 from PySide6.QtWidgets import (QAbstractButton, QApplication, QButtonGroup, QCheckBox,
                                QDialog, QFrame, QHBoxLayout, QLabel,
-                               QPlainTextEdit, QPushButton, QToolButton, QVBoxLayout,
-                               QWidget)
+                               QPlainTextEdit, QPushButton, QSizePolicy, QToolButton,
+                               QVBoxLayout, QWidget)
 
 from . import autostart, focus, service
 from . import config as config_mod
@@ -390,10 +390,10 @@ class MicButton(QAbstractButton):
 
 
 # -- settings -------------------------------------------------------------------
-def words_summary(words, room=70):
-    """The word list as one short line for Settings."""
+def words_summary(words, room=40):
+    """The word list, short enough for the space next to its button."""
     if not words:
-        return "Names it should spell your way, like fuelCell. None added yet."
+        return "Names to spell your way, like fuelCell"
     shown = []
     for word in words:
         if shown and len(", ".join(shown + [word])) > room:
@@ -449,17 +449,21 @@ class Settings(QDialog):
         left.addWidget(note)
 
         left.addWidget(self._section("MY WORDS"))
-        self.words_line = QLabel()
-        self.words_line.setObjectName("hint")
-        self.words_line.setWordWrap(True)
-        left.addWidget(self.words_line)
+        words_row = QHBoxLayout()
+        words_row.setSpacing(12)
         edit_words = QPushButton("Edit my words")
         edit_words.setObjectName("small")
         edit_words.clicked.connect(self._edit_words)
-        left.addWidget(edit_words, 0, Qt.AlignLeft)
+        words_row.addWidget(edit_words)
+        self.words_line = QLabel()
         self.words_hint = QLabel()
-        self.words_hint.setObjectName("hint")
-        self.words_hint.setWordWrap(True)
+        for label in (self.words_line, self.words_hint):
+            label.setObjectName("hint")
+            label.setWordWrap(True)
+            # wrap to the column instead of widening the window as the text changes
+            label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        words_row.addWidget(self.words_line, 1)
+        left.addLayout(words_row)
         self.words_hint.hide()
         left.addWidget(self.words_hint)
         self._words_shown = None
@@ -686,6 +690,9 @@ class Settings(QDialog):
             self.output.setPlainText(text or "The check didn't run.")
 
     def done(self, result):
+        # A closed Settings stays around (owned by the window): stop its timers.
+        self._test_timer.stop()
+        self._words_timer.stop()
         if self._proc is not None:  # closed while the check runs
             self._proc.finished.disconnect(self._check_done)
             self._proc.kill()
