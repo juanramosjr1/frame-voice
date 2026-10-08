@@ -355,3 +355,28 @@ def test_failed_kreadconfig_never_wipes_rules(monkeypatch):
     conf = focus.KConfig()
     conf.tools = ("/bin/false", "/bin/false")
     assert focus.install_kwin_rule(conf) is False  # read failed: nothing written
+
+
+# -- accuracy ----------------------------------------------------------------------
+def test_quiet_recordings_are_turned_up():
+    import numpy as np
+    from frame_voice.voice import boost_quiet
+    quiet = np.array([0.0, 0.05, -0.1], dtype=np.float32)
+    assert abs(float(np.abs(boost_quiet(quiet)).max()) - 0.5) < 1e-6
+    loud = np.array([0.0, 0.8], dtype=np.float32)
+    assert boost_quiet(loud) is loud
+    hiss = np.array([0.0, 0.01], dtype=np.float32)
+    assert abs(float(boost_quiet(hiss).max()) - 0.08) < 1e-6  # at most 8x
+    silent = np.zeros(4, dtype=np.float32)
+    assert boost_quiet(silent) is silent
+
+
+def test_phantom_words_are_dropped():
+    from types import SimpleNamespace as S
+    from frame_voice.voice import keep
+    real = S(text=" Open the Steam store.", no_speech_prob=0.1, avg_logprob=-0.3)
+    assert keep(real)
+    assert not keep(S(text=" Thank you.", no_speech_prob=0.1, avg_logprob=-0.3))
+    assert not keep(S(text=" Thanks for watching!", no_speech_prob=0.2, avg_logprob=-0.5))
+    assert not keep(S(text=" hmm okay", no_speech_prob=0.9, avg_logprob=-1.5))
+    assert keep(S(text=" Thank you for the help.", no_speech_prob=0.1, avg_logprob=-0.3))

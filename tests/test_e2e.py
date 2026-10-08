@@ -50,3 +50,39 @@ def test_speech_becomes_text(tmp_path):
     print("heard:", text)
     for word in ("hello", "world", "test"):
         assert word in text
+
+
+def test_silence_and_quiet_speech(tmp_path):
+    """Silence types nothing; quiet speech is still heard."""
+    import wave
+
+    import numpy as np
+
+    from frame_voice.voice import Transcriber, load_wav
+
+    tx = Transcriber("tiny.en")
+    hush = tmp_path / "hush.wav"
+    with wave.open(str(hush), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(16000)
+        noise = (np.random.default_rng(1).normal(0, 30, 16000 * 2)).astype("<i2")
+        w.writeframes(noise.tobytes())
+    assert tx.transcribe(str(hush)) == ""
+
+    if not shutil.which("espeak-ng"):
+        pytest.skip("espeak-ng not installed")
+    loud = tmp_path / "loud.wav"
+    subprocess.run(["espeak-ng", "-s", "140", "-w", str(loud),
+                    "Open the Steam store and search for games."], check=True)
+    audio = (load_wav(str(loud)) * 0.05 * 32767).astype("<i2")  # far from the mic
+    quiet = tmp_path / "quiet.wav"
+    with wave.open(str(quiet), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(16000)
+        w.writeframes(audio.tobytes())
+    text = tx.transcribe(str(quiet)).lower()
+    print("heard quietly:", text)
+    for word in ("steam", "store", "games"):
+        assert word in text

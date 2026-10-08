@@ -1,6 +1,7 @@
 """Record from the headset mic and turn it into text with Whisper (runs locally)."""
 
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -73,6 +74,29 @@ def load_wav(path, rate=16000):
     return audio.astype(np.float32)
 
 
+# What Whisper "hears" in silence or breathing (it was trained on subtitles).
+PHANTOM = {"thank you", "thanks for watching", "thank you for watching", "you", "bye",
+           "thank you very much", "subtitles by the amara.org community"}
+
+
+def boost_quiet(audio, target=0.5, most=8.0):
+    """Turn up a quiet recording (a headset mic held far off), so soft words
+    aren't mistaken for silence. Loud recordings are left alone."""
+    import numpy as np
+
+    peak = float(np.abs(audio).max()) if len(audio) else 0.0
+    if peak <= 1e-4 or peak >= target:
+        return audio
+    return (audio * min(target / peak, most)).astype(np.float32)
+
+
+def keep(segment):
+    """False for a segment that is almost surely not speech."""
+    if segment.no_speech_prob > 0.6 and segment.avg_logprob < -1.0:
+        return False
+    return re.sub(r"[^a-z. ]", "", segment.text.lower()).strip(" .") not in PHANTOM
+
+
 class Transcriber:
     def __init__(self, model="base.en", language="en"):
         from faster_whisper import WhisperModel
@@ -83,6 +107,16 @@ class Transcriber:
 
     def transcribe(self, wav_path):
         segments, _ = self._model.transcribe(
-            load_wav(wav_path), language=self._language, vad_filter=True, beam_size=1
+            boost_quiet(load_wav(wav_path)),
+            language=self._language,
+            # Weigh 5 guesses instead of taking the first: noticeably fewer
+            # wrong words, for a little more time.
+            beam_size=5,
+            # Each dictation stands alone; carrying text over can repeat words.
+            condition_on_previous_text=False,
+            # Cut silence, but keep a soft start or end of a word.
+            vad_filter=True,
+            vad_parameters={"threshold": 0.35, "speech_pad_ms": 400,
+                            "min_silence_duration_ms": 1000},
         )
-        return " ".join(s.text.strip() for s in segments).strip()
+        return " ".join(s.text.strip() for s in segments if keep(s)).strip()
