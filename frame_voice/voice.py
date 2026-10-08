@@ -108,24 +108,24 @@ class Transcriber:
     def transcribe(self, wav_path):
         return self.decode(load_wav(wav_path))
 
-    def decode(self, audio, careful=True):
-        """Audio to text. careful=False is how versions before 0.4.1 did it
-        (kept to measure against)."""
-        if not careful:
-            segments, _ = self._model.transcribe(audio, language=self._language,
-                                                 vad_filter=True, beam_size=1)
-            return " ".join(s.text.strip() for s in segments).strip()
+    def decode(self, audio, beam=5, boost=True, gentle_vad=True, drop_phantoms=True):
+        """Audio to text. beam=1 with everything else off is how versions
+        before 0.4.1 did it (kept to measure against)."""
+        options = {}
+        if gentle_vad:
+            # Cut silence, but keep a soft start or end of a word.
+            options["vad_parameters"] = {"threshold": 0.35, "speech_pad_ms": 400,
+                                         "min_silence_duration_ms": 1000}
         segments, _ = self._model.transcribe(
-            boost_quiet(audio),
+            boost_quiet(audio) if boost else audio,
             language=self._language,
             # Weigh 5 guesses instead of taking the first: fewer wrong
             # words, for a little more time.
-            beam_size=5,
+            beam_size=beam,
             # Each dictation stands alone; carrying text over can repeat words.
-            condition_on_previous_text=False,
-            # Cut silence, but keep a soft start or end of a word.
+            condition_on_previous_text=not drop_phantoms,
             vad_filter=True,
-            vad_parameters={"threshold": 0.35, "speech_pad_ms": 400,
-                            "min_silence_duration_ms": 1000},
+            **options,
         )
-        return " ".join(s.text.strip() for s in segments if keep(s)).strip()
+        return " ".join(s.text.strip() for s in segments
+                        if not drop_phantoms or keep(s)).strip()

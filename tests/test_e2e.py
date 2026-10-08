@@ -46,8 +46,14 @@ def test_speech_becomes_text(tmp_path):
     wav = tmp_path / "say.wav"
     subprocess.run(["espeak-ng", "-s", "140", "-w", str(wav),
                     "Hello world, this is a voice typing test."], check=True)
-    text = Transcriber("base.en").transcribe(str(wav)).lower()
+    tx = Transcriber("base.en")
+    text = tx.transcribe(str(wav)).lower()
     print("heard:", text)
+    from frame_voice.voice import load_wav
+    for beam in (1, 5):
+        for vad in (False, True):
+            print(f"::notice title=hello beam {beam} gentle {vad}::"
+                  + tx.decode(load_wav(str(wav)), beam=beam, gentle_vad=vad))
     for word in ("hello", "world", "test"):
         assert word in text
 
@@ -98,30 +104,37 @@ def test_dictation_is_more_accurate_than_before(tmp_path):
             noise = np.random.default_rng(i).normal(0, 0.02, len(audio)).astype(np.float32)
             clips += [(sentence, "clear", audio), (sentence, "quiet", audio * 0.04),
                       (sentence, "noisy", audio + noise)]
+    old = dict(beam=1, boost=False, gentle_vad=False, drop_phantoms=False)
+    variants = {"old": old, "new": {},
+                "5 guesses only": dict(old, beam=5), "louder only": dict(old, boost=True),
+                "gentle silence cut only": dict(old, gentle_vad=True),
+                "phantom filter only": dict(old, drop_phantoms=True)}
     score = {}
-    for careful in (False, True):
-        errors, total, start = {}, {}, time.monotonic()
+    for name, options in variants.items():
+        errors, total, start, examples = {}, {}, time.monotonic(), []
         for sentence, kind, audio in clips:
-            e, n = word_errors(sentence, tx.decode(audio, careful=careful))
+            heard = tx.decode(audio, **options)
+            e, n = word_errors(sentence, heard)
             errors[kind] = errors.get(kind, 0) + e
             total[kind] = total.get(kind, 0) + n
+            if e and kind == "clear" and len(examples) < 2:
+                examples.append(heard)
         took = (time.monotonic() - start) / len(clips)
         rate = 100 * sum(errors.values()) / sum(total.values())
         parts = ", ".join(f"{k} {100 * errors[k] / total[k]:.1f}%" for k in errors)
-        name = "new" if careful else "old"
         print(f"::notice title=accuracy {name}::wrong words {rate:.1f}% ({parts}), "
-              f"{took:.2f} s per dictation")
+              f"{took:.2f} s per dictation, e.g. {examples}")
         score[name] = rate
     rng = np.random.default_rng(7)
     phantom = {}
-    for careful in (False, True):
-        phantom[careful] = sum(
+    for name in ("old", "new"):
+        phantom[name] = sum(
             bool(tx.decode(rng.normal(0, 0.004 * (k + 1), 32000).astype(np.float32),
-                           careful=careful)) for k in range(6))
-    print(f"::notice title=silence::old typed something for {phantom[False]}/6 silent "
-          f"clips, new for {phantom[True]}/6")
+                           **variants[name])) for k in range(6))
+    print(f"::notice title=silence::old typed something for {phantom['old']}/6 silent "
+          f"clips, new for {phantom['new']}/6")
     assert score["new"] <= score["old"]
-    assert phantom[True] <= phantom[False]
+    assert phantom["new"] <= phantom["old"]
 
 
 def test_silence_types_nothing(tmp_path):
