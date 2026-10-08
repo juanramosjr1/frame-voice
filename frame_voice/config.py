@@ -64,6 +64,44 @@ def load(path=None):
     return cfg
 
 
+WORDS_HEADER = """\
+# My words: names and words the speech model should spell your way, like fuelCell.
+# Put one on each line, then save. Your next dictation uses them.
+# Only add words it gets wrong: a short list works best.
+# Lines starting with # are ignored.
+"""
+
+
+def words_path():
+    return CONFIG_DIR / "words.txt"
+
+
+def load_words(path=None):
+    """The user's word list (Settings > My words), without repeats."""
+    try:
+        text = Path(path or words_path()).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return []
+    words = []
+    for line in text.splitlines():
+        if line.lstrip().startswith("#"):
+            continue
+        for word in line.split(","):
+            word = " ".join(word.split())
+            if word and word not in words:
+                words.append(word)
+    return words
+
+
+def words_file(path=None):
+    """The word list's path, created with instructions if it's missing."""
+    path = Path(path or words_path())
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(WORDS_HEADER, encoding="utf-8")
+    return path
+
+
 def save(cfg, path=None):
     path = Path(path or CONFIG_DIR / "config.json")
     path.parent.mkdir(parents=True, exist_ok=True)

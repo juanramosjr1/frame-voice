@@ -63,6 +63,15 @@ SENTENCES = [
 ]
 
 
+# (what's said, how the word list spells it)
+NAMES = [
+    ("My company is called fuel cell.", "fuelCell"),
+    ("Send the link to Kaylee tonight.", "Kayleigh"),
+    ("Tonight I am playing Half Life Alyx.", "Alyx"),
+]
+MY_WORDS = ", ".join(spelled for _said, spelled in NAMES)
+
+
 def word_errors(ref, heard):
     """Word-level edit distance (substitutions, missing and extra words)."""
     import re
@@ -81,7 +90,8 @@ def word_errors(ref, heard):
 
 def test_dictation_is_more_accurate_than_before(tmp_path):
     """Measure the 0.4.1 settings against the old ones on the default model:
-    clear, quiet (far from the mic) and noisy speech, plus silence."""
+    clear, quiet (far from the mic) and noisy speech, plus silence. Also
+    check that a word list doesn't make everything else worse."""
     if not shutil.which("espeak-ng"):
         pytest.skip("espeak-ng not installed")
     import numpy as np
@@ -100,7 +110,7 @@ def test_dictation_is_more_accurate_than_before(tmp_path):
             clips += [(sentence, "clear", audio), (sentence, "quiet", audio * 0.04),
                       (sentence, "noisy", audio + noise)]
     old = dict(beam=1, boost=False, gentle_vad=False, drop_phantoms=False)
-    variants = {"old": old, "new": {}}
+    variants = {"old": old, "new": {}, "new with a word list": dict(words=MY_WORDS)}
     score = {}
     for name, options in variants.items():
         errors, total, start, examples = {}, {}, time.monotonic(), []
@@ -118,15 +128,41 @@ def test_dictation_is_more_accurate_than_before(tmp_path):
               f"{took:.2f} s per dictation, e.g. {examples}")
         score[name] = rate
     rng = np.random.default_rng(7)
-    phantom = {}
-    for name in ("old", "new"):
-        phantom[name] = sum(
-            bool(tx.decode(rng.normal(0, 0.004 * (k + 1), 32000).astype(np.float32),
-                           **variants[name])) for k in range(6))
-    print(f"::notice title=silence::old typed something for {phantom['old']}/6 silent "
-          f"clips, new for {phantom['new']}/6")
+    hush = [rng.normal(0, 0.004 * (k + 1), 32000).astype(np.float32) for k in range(6)]
+    phantom = {name: sum(bool(tx.decode(a, **options)) for a in hush)
+               for name, options in variants.items()}
+    print("::notice title=silence::typed something for "
+          + ", ".join(f"{n}/6 silent clips ({name})" for name, n in phantom.items()))
     assert score["new"] <= score["old"]
+    assert score["new with a word list"] <= score["new"] + 2.0
     assert phantom["new"] <= phantom["old"]
+    assert phantom["new with a word list"] <= phantom["old"]
+
+
+def test_my_words_are_spelled_my_way(tmp_path):
+    """Names on the word list come out spelled the list's way."""
+    if not shutil.which("espeak-ng"):
+        pytest.skip("espeak-ng not installed")
+    from frame_voice.voice import Transcriber, load_wav
+
+    tx = Transcriber("base.en")
+    right = {"without": 0, "with": 0}
+    heard = {"without": [], "with": []}
+    for i, (said, spelled) in enumerate(NAMES):
+        for voice, speed in (("en-us", 150), ("en+m3", 170)):
+            wav = tmp_path / f"name{i}-{voice}.wav"
+            subprocess.run(["espeak-ng", "-v", voice, "-s", str(speed), "-w", str(wav), said],
+                           check=True)
+            audio = load_wav(str(wav))
+            for key, words in (("without", ""), ("with", MY_WORDS)):
+                text = tx.decode(audio, words=words)
+                right[key] += spelled in text
+                heard[key].append(text)
+    total = 2 * len(NAMES)
+    for key in ("without", "with"):
+        print(f"::notice title=my words, {key} the list::spelled right {right[key]}/{total}: "
+              f"{heard[key]}")
+    assert right["with"] >= total - 2 and right["with"] > right["without"]
 
 
 def test_silence_types_nothing(tmp_path):

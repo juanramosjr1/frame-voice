@@ -198,6 +198,36 @@ def test_focus_guard_passes_when_window_inactive(win):
     assert win.give_focus_back() is True
 
 
+def test_my_words_in_settings(win, tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "CONFIG_DIR", tmp_path)
+    opened = []
+    monkeypatch.setattr(ui.QDesktopServices, "openUrl",
+                        lambda url: opened.append(url.toLocalFile()) or True)
+    s = ui.Settings(win, win.cfg, win.engine, win.vr)
+    assert "None added yet" in s.words_line.text()
+    assert s.words_hint.isHidden()
+    edit = [b for b in s.findChildren(QtWidgets.QPushButton) if b.text() == "Edit my words"]
+    edit[0].click()
+    path = tmp_path / "words.txt"
+    assert opened == [str(path)] and path.read_text() == config.WORDS_HEADER
+    assert not s.words_hint.isHidden() and "save" in s.words_hint.text()
+    path.write_text(config.WORDS_HEADER + "fuelCell\nKayleigh\n")
+    s._refresh_words()  # the timer does this every second
+    assert s.words_line.text() == "fuelCell, Kayleigh"
+    # no text editor to open it with: say where the list is
+    monkeypatch.setattr(ui.QDesktopServices, "openUrl", lambda url: False)
+    edit[0].click()
+    assert "words.txt" in s.words_hint.text()
+    s.close()
+
+
+def test_words_summary():
+    assert "None added yet" in ui.words_summary([])
+    assert ui.words_summary(["fuelCell", "Kayleigh"]) == "fuelCell, Kayleigh"
+    many = ui.words_summary([f"Name{i}" for i in range(30)])
+    assert many.endswith(" more") and len(many) < 90
+
+
 def test_controller_preset_switch(win, tmp_path, monkeypatch):
     monkeypatch.setattr(config, "CONFIG_DIR", tmp_path)
     s = ui.Settings(win, win.cfg, win.engine, win.vr)

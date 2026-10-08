@@ -5,10 +5,11 @@ import os
 import sys
 import threading
 import time
+from pathlib import Path
 
 from PySide6.QtCore import (QEasingCurve, QEvent, QObject, QPointF, QProcess, QRectF, QSize,
-                            Qt, QTimer, QVariantAnimation, Signal)
-from PySide6.QtGui import (QColor, QFont, QFontMetricsF, QGuiApplication, QIcon,
+                            Qt, QTimer, QUrl, QVariantAnimation, Signal)
+from PySide6.QtGui import (QColor, QDesktopServices, QFont, QFontMetricsF, QGuiApplication, QIcon,
                            QLinearGradient, QPainter, QPainterPath, QPen, QPixmap,
                            QRadialGradient)
 from PySide6.QtWidgets import (QAbstractButton, QApplication, QButtonGroup, QCheckBox,
@@ -389,6 +390,19 @@ class MicButton(QAbstractButton):
 
 
 # -- settings -------------------------------------------------------------------
+def words_summary(words, room=70):
+    """The word list as one short line for Settings."""
+    if not words:
+        return "Names it should spell your way, like fuelCell. None added yet."
+    shown = []
+    for word in words:
+        if shown and len(", ".join(shown + [word])) > room:
+            break
+        shown.append(word)
+    more = len(words) - len(shown)
+    return ", ".join(shown) + (f" and {more} more" if more else "")
+
+
 class Settings(QDialog):
     def __init__(self, parent, cfg, engine, vr=None):
         super().__init__(parent)
@@ -433,6 +447,27 @@ class Settings(QDialog):
         note.setObjectName("hint")
         note.setWordWrap(True)
         left.addWidget(note)
+
+        left.addWidget(self._section("MY WORDS"))
+        self.words_line = QLabel()
+        self.words_line.setObjectName("hint")
+        self.words_line.setWordWrap(True)
+        left.addWidget(self.words_line)
+        edit_words = QPushButton("Edit my words")
+        edit_words.setObjectName("small")
+        edit_words.clicked.connect(self._edit_words)
+        left.addWidget(edit_words, 0, Qt.AlignLeft)
+        self.words_hint = QLabel()
+        self.words_hint.setObjectName("hint")
+        self.words_hint.setWordWrap(True)
+        self.words_hint.hide()
+        left.addWidget(self.words_hint)
+        self._words_shown = None
+        self._refresh_words()
+        # picks up the list as soon as it's saved in the text editor
+        self._words_timer = QTimer(self, interval=1000)
+        self._words_timer.timeout.connect(self._refresh_words)
+        self._words_timer.start()
 
         left.addWidget(self._section("TYPING"))
         self._toggle(left, "Add a space after each dictation", "add_space")
@@ -608,6 +643,23 @@ class Settings(QDialog):
             else:
                 style = f"background: transparent; color: #4b5263; border: 1px dashed {BORDER};"
             pill.setStyleSheet(style + " border-radius: 10px; font-weight: 600;")
+
+    def _refresh_words(self):
+        words = config_mod.load_words()
+        if words != self._words_shown:
+            self._words_shown = words
+            self.words_line.setText(words_summary(words))
+
+    def _edit_words(self):
+        path = config_mod.words_file()
+        if QDesktopServices.openUrl(QUrl.fromLocalFile(str(path))):
+            self.words_hint.setText("Opened in a text editor. Add your words and save. "
+                                    "Your next dictation uses them.")
+        else:
+            shown = str(path).replace(str(Path.home()), "~", 1)
+            self.words_hint.setText(f"Open {shown} in a text editor, add your words "
+                                    "and save.")
+        self.words_hint.show()
 
     def _customize(self):
         if not (self.vr and self.vr.open_bindings()):

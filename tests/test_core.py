@@ -141,8 +141,9 @@ def make_engine(tmp_path, text="hello there", focus_ok=True, **cfg_over):
         def __init__(self, model):
             self.model = model
 
-        def transcribe(self, path):
+        def transcribe(self, path, words=""):
             assert os.path.exists(path)
+            eng.heard_words = words
             return text
 
     eng = Engine(cfg, on_state=lambda s, m: states.append((s, m)),
@@ -380,3 +381,30 @@ def test_phantom_words_are_dropped():
     assert not keep(S(text=" Thanks for watching!", no_speech_prob=0.2, avg_logprob=-0.5))
     assert not keep(S(text=" hmm okay", no_speech_prob=0.9, avg_logprob=-1.5))
     assert keep(S(text=" Thank you for the help.", no_speech_prob=0.1, avg_logprob=-0.3))
+
+
+# -- my words ------------------------------------------------------------------------
+def test_my_words_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "CONFIG_DIR", tmp_path)
+    assert config.load_words() == []
+    path = config.words_file()
+    assert path == tmp_path / "words.txt"
+    assert path.read_text() == config.WORDS_HEADER
+    assert config.load_words() == []  # only the instructions so far
+    path.write_text(config.WORDS_HEADER + "fuelCell\n  Kayleigh , Half-Life:  Alyx\n\n"
+                    "# not this\nfuelCell\n")
+    assert config.load_words() == ["fuelCell", "Kayleigh", "Half-Life: Alyx"]
+    path.write_bytes(b"\xff\xfe not text")
+    assert config.load_words() == []
+    assert config.words_file() == path  # a list that's there is never replaced
+    assert path.read_bytes() == b"\xff\xfe not text"
+
+
+def test_dictation_uses_my_words(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "CONFIG_DIR", tmp_path)
+    eng, dev, _ = make_engine(tmp_path, "hi")
+    eng._finish(eng.recorder.stop())
+    assert eng.heard_words == ""
+    (tmp_path / "words.txt").write_text("fuelCell\nKayleigh\n")
+    eng._finish(eng.recorder.stop())  # saved lists count from the next dictation
+    assert eng.heard_words == "fuelCell, Kayleigh"

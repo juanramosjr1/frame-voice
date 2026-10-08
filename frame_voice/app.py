@@ -142,7 +142,8 @@ class Engine:
 
     def _finish(self, path):
         try:
-            text = self.transcriber.transcribe(path) if path else ""
+            words = ", ".join(config_mod.load_words())
+            text = self.transcriber.transcribe(path, words=words) if path else ""
         except Exception as err:
             self._set(ERROR, f"Couldn't understand the recording: {err}")
             return

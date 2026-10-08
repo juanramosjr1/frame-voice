@@ -105,13 +105,18 @@ class Transcriber:
         self._model = WhisperModel(model, device="cpu", compute_type="int8")
         self._language = language
 
-    def transcribe(self, wav_path):
-        return self.decode(load_wav(wav_path))
+    def transcribe(self, wav_path, words=""):
+        return self.decode(load_wav(wav_path), words=words)
 
-    def decode(self, audio, beam=5, boost=True, gentle_vad=True, drop_phantoms=True):
-        """Audio to text. beam=1 with everything else off is how versions
-        before 0.4.1 did it (kept to measure against)."""
+    def decode(self, audio, words="", beam=5, boost=True, gentle_vad=True,
+               drop_phantoms=True):
+        """Audio to text. words: the user's word list, comma separated ("" for
+        none). beam=1 with everything else off is how versions before 0.4.1
+        did it (kept to measure against)."""
         options = {}
+        if words:
+            # Names the user wants spelled their way (Settings > My words).
+            options["hotwords"] = words
         if gentle_vad:
             # Cut silence, but keep a soft start or end of a word.
             options["vad_parameters"] = {"threshold": 0.35, "speech_pad_ms": 400,
