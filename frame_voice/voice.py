@@ -106,11 +106,20 @@ class Transcriber:
         self._language = language
 
     def transcribe(self, wav_path):
+        return self.decode(load_wav(wav_path))
+
+    def decode(self, audio, careful=True):
+        """Audio to text. careful=False is how versions before 0.4.1 did it
+        (kept to measure against)."""
+        if not careful:
+            segments, _ = self._model.transcribe(audio, language=self._language,
+                                                 vad_filter=True, beam_size=1)
+            return " ".join(s.text.strip() for s in segments).strip()
         segments, _ = self._model.transcribe(
-            boost_quiet(load_wav(wav_path)),
+            boost_quiet(audio),
             language=self._language,
-            # Weigh 5 guesses instead of taking the first: noticeably fewer
-            # wrong words, for a little more time.
+            # Weigh 5 guesses instead of taking the first: fewer wrong
+            # words, for a little more time.
             beam_size=5,
             # Each dictation stands alone; carrying text over can repeat words.
             condition_on_previous_text=False,

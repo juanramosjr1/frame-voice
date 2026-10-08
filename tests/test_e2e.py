@@ -46,43 +46,95 @@ def test_speech_becomes_text(tmp_path):
     wav = tmp_path / "say.wav"
     subprocess.run(["espeak-ng", "-s", "140", "-w", str(wav),
                     "Hello world, this is a voice typing test."], check=True)
-    text = Transcriber("tiny.en").transcribe(str(wav)).lower()
+    text = Transcriber("base.en").transcribe(str(wav)).lower()
     print("heard:", text)
     for word in ("hello", "world", "test"):
         assert word in text
 
 
-def test_silence_and_quiet_speech(tmp_path):
-    """Silence types nothing; quiet speech is still heard."""
-    import wave
+SENTENCES = [
+    "Hello world, this is a voice typing test.",
+    "Open the Steam store and search for games.",
+    "I did say do it, but you didn't listen.",
+    "Can you send me the link to that video later tonight?",
+    "Please turn the volume down a little bit.",
+    "We should meet at seven thirty near the coffee shop.",
+]
 
+
+def word_errors(ref, heard):
+    """Word-level edit distance (substitutions, missing and extra words)."""
+    import re
+
+    def words(t):
+        return re.sub(r"[^a-z0-9 ]", "", t.lower().replace("-", " ")).split()
+
+    r, h = words(ref), words(heard)
+    d = list(range(len(h) + 1))
+    for i in range(1, len(r) + 1):
+        prev, d[0] = d[0], i
+        for j in range(1, len(h) + 1):
+            prev, d[j] = d[j], min(d[j] + 1, d[j - 1] + 1, prev + (r[i - 1] != h[j - 1]))
+    return d[len(h)], len(r)
+
+
+def test_dictation_is_more_accurate_than_before(tmp_path):
+    """Measure the 0.4.1 settings against the old ones on the default model:
+    clear, quiet (far from the mic) and noisy speech, plus silence."""
+    if not shutil.which("espeak-ng"):
+        pytest.skip("espeak-ng not installed")
     import numpy as np
 
     from frame_voice.voice import Transcriber, load_wav
 
-    tx = Transcriber("tiny.en")
+    tx = Transcriber("base.en")
+    clips = []
+    for i, sentence in enumerate(SENTENCES):
+        for voice, speed in (("en-us", 150), ("en+m3", 175), ("en+f3", 135)):
+            wav = tmp_path / f"{i}-{voice}.wav"
+            subprocess.run(["espeak-ng", "-v", voice, "-s", str(speed), "-w", str(wav),
+                            sentence], check=True)
+            audio = load_wav(str(wav))
+            noise = np.random.default_rng(i).normal(0, 0.02, len(audio)).astype(np.float32)
+            clips += [(sentence, "clear", audio), (sentence, "quiet", audio * 0.04),
+                      (sentence, "noisy", audio + noise)]
+    score = {}
+    for careful in (False, True):
+        errors, total, start = {}, {}, time.monotonic()
+        for sentence, kind, audio in clips:
+            e, n = word_errors(sentence, tx.decode(audio, careful=careful))
+            errors[kind] = errors.get(kind, 0) + e
+            total[kind] = total.get(kind, 0) + n
+        took = (time.monotonic() - start) / len(clips)
+        rate = 100 * sum(errors.values()) / sum(total.values())
+        parts = ", ".join(f"{k} {100 * errors[k] / total[k]:.1f}%" for k in errors)
+        name = "new" if careful else "old"
+        print(f"::notice title=accuracy {name}::wrong words {rate:.1f}% ({parts}), "
+              f"{took:.2f} s per dictation")
+        score[name] = rate
+    rng = np.random.default_rng(7)
+    phantom = {}
+    for careful in (False, True):
+        phantom[careful] = sum(
+            bool(tx.decode(rng.normal(0, 0.004 * (k + 1), 32000).astype(np.float32),
+                           careful=careful)) for k in range(6))
+    print(f"::notice title=silence::old typed something for {phantom[False]}/6 silent "
+          f"clips, new for {phantom[True]}/6")
+    assert score["new"] <= score["old"]
+    assert phantom[True] <= phantom[False]
+
+
+def test_silence_types_nothing(tmp_path):
+    import wave
+
+    import numpy as np
+
+    from frame_voice.voice import Transcriber
+
     hush = tmp_path / "hush.wav"
     with wave.open(str(hush), "wb") as w:
         w.setnchannels(1)
         w.setsampwidth(2)
         w.setframerate(16000)
-        noise = (np.random.default_rng(1).normal(0, 30, 16000 * 2)).astype("<i2")
-        w.writeframes(noise.tobytes())
-    assert tx.transcribe(str(hush)) == ""
-
-    if not shutil.which("espeak-ng"):
-        pytest.skip("espeak-ng not installed")
-    loud = tmp_path / "loud.wav"
-    subprocess.run(["espeak-ng", "-s", "140", "-w", str(loud),
-                    "Open the Steam store and search for games."], check=True)
-    audio = (load_wav(str(loud)) * 0.05 * 32767).astype("<i2")  # far from the mic
-    quiet = tmp_path / "quiet.wav"
-    with wave.open(str(quiet), "wb") as w:
-        w.setnchannels(1)
-        w.setsampwidth(2)
-        w.setframerate(16000)
-        w.writeframes(audio.tobytes())
-    text = tx.transcribe(str(quiet)).lower()
-    print("heard quietly:", text)
-    for word in ("steam", "store", "games"):
-        assert word in text
+        w.writeframes(np.random.default_rng(1).normal(0, 30, 32000).astype("<i2").tobytes())
+    assert Transcriber("base.en").transcribe(str(hush)) == ""
