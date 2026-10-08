@@ -33,7 +33,7 @@ The installer shows 5 steps and tells you when it's done. Running it again updat
 
 **3. Open fuelCell Voice Typing** from your apps. If the bottom of the window says the shortcuts need a SteamVR setting, tap **Turn on**. (That's SteamVR's **Enable global input from overlays** setting. It lets the app use your controller buttons while the Steam menu or the desktop is in front.)
 
-That's it. From now on the app starts by itself every time SteamVR starts, so whenever the headset is on, the shortcuts work without opening anything. Open the app when you want its window. (If the installer said the typing permission takes effect after a restart, restart the headset once.)
+That's it. From now on the app starts by itself every time SteamVR starts, so whenever the headset is on, the shortcuts work without opening anything.(If the installer said the typing permission takes effect after a restart, restart the headset once.)
 
 To make sure everything is set up, run this in Konsole:
 
