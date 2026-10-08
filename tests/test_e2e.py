@@ -46,15 +46,10 @@ def test_speech_becomes_text(tmp_path):
     wav = tmp_path / "say.wav"
     subprocess.run(["espeak-ng", "-s", "140", "-w", str(wav),
                     "Hello world, this is a voice typing test."], check=True)
-    tx = Transcriber("base.en")
-    text = tx.transcribe(str(wav)).lower()
+    text = Transcriber("base.en").transcribe(str(wav)).lower()
     print("heard:", text)
-    from frame_voice.voice import load_wav
-    for beam in (1, 5):
-        for vad in (False, True):
-            print(f"::notice title=hello beam {beam} gentle {vad}::"
-                  + tx.decode(load_wav(str(wav)), beam=beam, gentle_vad=vad))
-    for word in ("hello", "world", "test"):
+    # base.en hears this robot voice's "Hello" as "the low" with old and new settings alike.
+    for word in ("world", "typing", "test"):
         assert word in text
 
 
@@ -105,10 +100,7 @@ def test_dictation_is_more_accurate_than_before(tmp_path):
             clips += [(sentence, "clear", audio), (sentence, "quiet", audio * 0.04),
                       (sentence, "noisy", audio + noise)]
     old = dict(beam=1, boost=False, gentle_vad=False, drop_phantoms=False)
-    variants = {"old": old, "new": {},
-                "5 guesses only": dict(old, beam=5), "louder only": dict(old, boost=True),
-                "gentle silence cut only": dict(old, gentle_vad=True),
-                "phantom filter only": dict(old, drop_phantoms=True)}
+    variants = {"old": old, "new": {}}
     score = {}
     for name, options in variants.items():
         errors, total, start, examples = {}, {}, time.monotonic(), []
